@@ -1,0 +1,6 @@
+{
+  "name": "Operação Maldivas — @metaexplicada (Projeto 273 Dias)",
+  "description": "Painel biomecânico e diário de 273 dias rumo às Maldivas com Escudo Clínico L4-S1, treinos guiados, previsão de ondas ao vivo e gerador de cards @metaexplicada.",
+  "requestFramePermissions": ["geolocation", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
