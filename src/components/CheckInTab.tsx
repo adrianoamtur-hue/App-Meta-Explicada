@@ -1,67 +1,52 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Camera,
   Check,
   Loader2,
   MapPin,
   Mic,
-  MicOff,
   Save,
-  Sparkles,
+  ShieldCheck,
 } from 'lucide-react';
 import type { CheckInEntry, Modality, PreWorkoutState } from '../types';
 import {
   estimateCalories,
+  formatPtDate,
   getProjectProgress,
   parseVoiceCheckIn,
+  shiftIsoDate,
 } from '../utils/logic';
 
 interface CheckInTabProps {
   todayIso: string;
   preWorkout: PreWorkoutState;
   onSaveCheckIn: (entry: CheckInEntry) => void;
+  onOpenVoiceModal: () => void;
+  onOpenRestModal: () => void;
 }
 
-const MODALITIES: { id: Modality; label: string; highlight?: boolean }[] = [
+const MOVEMENT_MODALITIES: { id: Modality; label: string; highlight?: boolean }[] = [
   { id: 'Wellhub — Pilates', label: 'Wellhub — Pilates', highlight: true },
   { id: 'Personal Trainer', label: 'Personal Trainer', highlight: true },
   { id: 'Areia / Orla', label: 'Areia / Orla' },
+  { id: 'Fluxo Chinês', label: 'Fluxo Chinês' },
   { id: 'Academia A', label: 'Academia A' },
   { id: 'Academia B', label: 'Academia B' },
-  { id: 'Fluxo Chinês', label: 'Fluxo Chinês' },
   { id: 'Hotel / Elásticos', label: 'Hotel / Elásticos' },
   { id: 'Surfskate', label: 'Surfskate' },
   { id: 'Surf no Mar', label: 'Surf no Mar' },
   { id: 'Elite Segura', label: 'Elite Segura' },
-  { id: 'Descanso Consciente', label: 'Descanso Consciente' },
 ];
-
-interface SpeechRecognitionEventLike {
-  results: {
-    length: number;
-    [index: number]: {
-      isFinal: boolean;
-      [index: number]: { transcript: string };
-    };
-  };
-}
-
-interface SpeechRecognitionLike {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  onresult: ((e: SpeechRecognitionEventLike) => void) | null;
-  onerror: ((e: { error: string }) => void) | null;
-  onend: (() => void) | null;
-  start: () => void;
-  stop: () => void;
-}
 
 export const CheckInTab: React.FC<CheckInTabProps> = ({
   todayIso,
   preWorkout,
   onSaveCheckIn,
+  onOpenVoiceModal,
+  onOpenRestModal,
 }) => {
+  const yesterdayIso = shiftIsoDate(todayIso, -1);
+
   const [date, setDate] = useState(todayIso);
   const [modality, setModality] = useState<Modality>('Wellhub — Pilates');
   const [isWellhub, setIsWellhub] = useState(true);
@@ -77,35 +62,28 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
   const [hasMediaForInsta, setHasMediaForInsta] = useState(true);
   const [note, setNote] = useState('');
 
-  // Voice Dictation state
-  const [isListening, setIsListening] = useState(false);
-  const [transcript, setTranscript] = useState('');
-  const [voiceFeedback, setVoiceFeedback] = useState<string | null>(null);
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
-
   // GPS state
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsStatus, setGpsStatus] = useState<string | null>(null);
 
-  // Save state
+  // Save & quick note parse notice
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
+  const [parseFeedback, setParseFeedback] = useState<string | null>(null);
 
-  // Sync lumbarBefore when preWorkout updates
   useEffect(() => {
     setLumbarBefore(preWorkout.lumbarNow);
     setRightLegRadiation(preWorkout.rightLegRadiation);
   }, [preWorkout.lumbarNow, preWorkout.rightLegRadiation]);
 
-  // Auto-update calories unless user manually edited
   useEffect(() => {
     if (!caloriesManual) {
       setCalories(estimateCalories(modality, durationMin));
     }
   }, [modality, durationMin, caloriesManual]);
 
-  const applyParsedVoice = (spokenText: string) => {
+  const applyNoteParse = (spokenText: string) => {
     const parsed = parseVoiceCheckIn(spokenText);
-    if (parsed.modality) {
+    if (parsed.modality && parsed.modality !== 'Descanso Consciente') {
       setModality(parsed.modality);
       if (parsed.modality === 'Wellhub — Pilates') setIsWellhub(true);
     }
@@ -123,72 +101,11 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
       setCaloriesManual(true);
     }
     if (parsed.hasMediaForInsta !== undefined) setHasMediaForInsta(parsed.hasMediaForInsta);
-    setNote((prev) => (prev ? `${prev} ${spokenText}` : spokenText));
-
-    if (parsed.matchedFields.length > 0) {
-      setVoiceFeedback(`Preenchido automaticamente: ${parsed.matchedFields.join(' · ')}`);
-    } else {
-      setVoiceFeedback('Transcrição adicionada à nota. Ajuste os campos abaixo se necessário.');
-    }
-  };
-
-  const toggleVoiceRecognition = () => {
-    if (isListening) {
-      recognitionRef.current?.stop();
-      setIsListening(false);
-      return;
-    }
-
-    const SpeechRecognitionCtor =
-      (window as unknown as { SpeechRecognition?: new () => SpeechRecognitionLike }).SpeechRecognition ||
-      (window as unknown as { webkitSpeechRecognition?: new () => SpeechRecognitionLike }).webkitSpeechRecognition;
-
-    if (!SpeechRecognitionCtor) {
-      setVoiceFeedback(
-        'Web Speech API indisponível neste navegador. Use o microfone nativo do teclado do iPhone diretamente no campo de Nota ou cole o ditado abaixo.'
-      );
-      return;
-    }
-
-    try {
-      const recognition = new SpeechRecognitionCtor();
-      recognition.lang = 'pt-BR';
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      let latestTranscript = '';
-
-      recognition.onresult = (event) => {
-        let combined = '';
-        for (let i = 0; i < event.results.length; i++) {
-          combined += event.results[i][0].transcript;
-        }
-        latestTranscript = combined.trim();
-        setTranscript(latestTranscript);
-      };
-
-      recognition.onerror = (err) => {
-        setIsListening(false);
-        setVoiceFeedback(
-          `Não foi possível captar áudio (${err.error}). Você também pode usar o ditado nativo do teclado do iPhone.`
-        );
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-        if (latestTranscript) {
-          applyParsedVoice(latestTranscript);
-        }
-      };
-
-      recognitionRef.current = recognition;
-      setTranscript('');
-      setVoiceFeedback('Ouvindo em português... fale modalidade, duração, esforço e lombar.');
-      setIsListening(true);
-      recognition.start();
-    } catch {
-      setIsListening(false);
-      setVoiceFeedback('Microfone bloqueado. Libere a permissão ou use o ditado nativo do teclado.');
-    }
+    setParseFeedback(
+      parsed.matchedFields.length > 0
+        ? `Campos preenchidos: ${parsed.matchedFields.join(' · ')}`
+        : 'Nenhum campo numérico encontrado na nota.'
+    );
   };
 
   const handleGetGps = () => {
@@ -223,17 +140,17 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
             .slice(0, 3)
             .join(', ');
           setLocation(formatted || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
-          setGpsStatus('Localização atualizada via GPS + OpenStreetMap.');
+          setGpsStatus('Localização atualizada via GPS.');
         } catch {
           setLocation(`${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
-          setGpsStatus('Coordenadas capturadas (edite o nome do local se preferir).');
+          setGpsStatus('Coordenadas capturadas (edite o nome se preferir).');
         } finally {
           setGpsLoading(false);
         }
       },
       () => {
         setGpsLoading(false);
-        setGpsStatus('Permissão de GPS negada ou indisponível — digite o local manualmente.');
+        setGpsStatus('Permissão de GPS negada — digite o local manualmente.');
       },
       { enableHighAccuracy: false, timeout: 8000 }
     );
@@ -269,71 +186,54 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
 
     onSaveCheckIn(entry);
     setSavedNotice(
-      `Check-in do DIA ${String(currentDay).padStart(2, '0')} salvo! Já disponível na Jornada e no Gerador de Card Story.`
+      `Treino do DIA ${String(currentDay).padStart(2, '0')} salvo! Já disponível na Jornada e nos Cards Story.`
     );
     setNote('');
     setDistanceKm('');
+    setParseFeedback(null);
     window.setTimeout(() => setSavedNotice(null), 4500);
   };
 
   return (
-    <div className="space-y-5">
-      {/* Voice Dictation Hero Card */}
-      <section className="rounded-2xl bg-[#06283D] text-white p-5 space-y-3.5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <p className="text-xs font-bold text-[#7FDAD0]">CHECK-IN UNIVERSAL EM 10 SEGUNDOS</p>
-            <h2 className="font-display font-bold text-lg sm:text-xl mt-0.5">
-              Ditar Check-in por Voz (pt-BR)
-            </h2>
-            <p className="text-xs text-white/80 mt-1">
-              Ex: &ldquo;Fiz Pilates pelo Wellhub por 50 minutos, esforço 3, lombar antes 4 depois 2, gravei vídeo pro @metaexplicada.&rdquo;
-            </p>
-          </div>
+    <div className="space-y-4">
+      {/* Universal Voice Trigger + Quick Conscious Rest */}
+      <section className="rounded-2xl bg-[#06283D] text-white p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5">
+        <div className="min-w-0">
+          <p className="text-[11px] font-bold text-[#7FDAD0]">
+            CHECK-IN DE MOVIMENTO · INDEPENDENTE DE SONO
+          </p>
+          <h2 className="font-display font-bold text-lg mt-0.5">
+            Prefere apenas falar o que fez?
+          </h2>
+          <p className="text-xs text-white/75 mt-0.5">
+            Use o Diário por Voz Universal para registrar treino, descanso, sono ou água de uma vez.
+          </p>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-2 shrink-0">
           <button
             type="button"
-            onClick={toggleVoiceRecognition}
-            className={`min-h-[54px] px-5 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shrink-0 ${
-              isListening
-                ? 'bg-[#E63946] text-white'
-                : 'bg-[#00A896] hover:bg-[#009282] text-white'
-            }`}
+            onClick={onOpenVoiceModal}
+            className="min-h-[48px] px-4 rounded-xl bg-[#00A896] hover:bg-[#009282] text-white font-display font-bold text-xs sm:text-sm inline-flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
           >
-            {isListening ? (
-              <>
-                <MicOff className="w-5 h-5" aria-hidden="true" />
-                <span>Parar Ditado</span>
-              </>
-            ) : (
-              <>
-                <Mic className="w-5 h-5" aria-hidden="true" />
-                <span>Ditar Check-in por Voz</span>
-              </>
-            )}
+            <Mic className="w-4 h-4" aria-hidden="true" />
+            <span>Falar o que fiz agora</span>
+          </button>
+          <button
+            type="button"
+            onClick={onOpenRestModal}
+            className="min-h-[48px] px-4 rounded-xl bg-white/10 hover:bg-white/18 text-white font-semibold text-xs inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+          >
+            <ShieldCheck className="w-4 h-4 text-[#7FDAD0]" aria-hidden="true" />
+            <span>Descanso Consciente</span>
           </button>
         </div>
-
-        {transcript && (
-          <div className="rounded-xl bg-white/10 border border-white/15 p-3 text-xs">
-            <span className="text-[#7FDAD0] font-bold">Transcrição: </span>
-            <span>{transcript}</span>
-          </div>
-        )}
-
-        {voiceFeedback && (
-          <p className="text-xs text-[#7FDAD0] flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-            <span>{voiceFeedback}</span>
-          </p>
-        )}
-
-        <p className="text-[11px] text-white/65">
-          Dica iPhone: se preferir, toque no campo de Nota abaixo e use o microfone nativo do teclado iOS — depois toque em &ldquo;Interpretar texto&rdquo; para preencher os campos automaticamente.
-        </p>
       </section>
 
-      {/* Main Check-in Form */}
-      <form onSubmit={handleSubmit} className="bg-white rounded-2xl border border-[#E5E0D5] p-5 space-y-5">
+      {/* Streamlined Movement-Only Check-in Form (Zero Sleep Fields) */}
+      <form
+        onSubmit={handleSubmit}
+        className="bg-white rounded-2xl border border-[#E5E0D5] p-4 sm:p-5 space-y-5"
+      >
         {savedNotice && (
           <div
             role="status"
@@ -344,13 +244,52 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
           </div>
         )}
 
+        {/* Quick Date: Hoje / Ontem + Date Picker */}
+        <div>
+          <span className="block text-xs font-bold text-[#06283D] mb-2">1. Dia do treino</span>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <button
+              type="button"
+              onClick={() => setDate(todayIso)}
+              aria-pressed={date === todayIso}
+              className={`min-h-[44px] rounded-xl text-xs font-bold border cursor-pointer ${
+                date === todayIso
+                  ? 'bg-[#06283D] text-white border-[#06283D]'
+                  : 'bg-[#F8F6F1] text-[#06283D] border-[#E5E0D5]'
+              }`}
+            >
+              Hoje ({formatPtDate(todayIso).slice(0, 5)})
+            </button>
+            <button
+              type="button"
+              onClick={() => setDate(yesterdayIso)}
+              aria-pressed={date === yesterdayIso}
+              className={`min-h-[44px] rounded-xl text-xs font-bold border cursor-pointer ${
+                date === yesterdayIso
+                  ? 'bg-[#06283D] text-white border-[#06283D]'
+                  : 'bg-[#F8F6F1] text-[#06283D] border-[#E5E0D5]'
+              }`}
+            >
+              Ontem ({formatPtDate(yesterdayIso).slice(0, 5)})
+            </button>
+            <input
+              id="ci-date"
+              aria-label="Escolher outra data"
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="col-span-2 sm:col-span-1 w-full min-h-[44px] px-3 rounded-xl bg-[#F8F6F1] border border-[#E5E0D5] font-mono text-sm text-[#06283D]"
+            />
+          </div>
+        </div>
+
         {/* 1-Tap Modality Picker */}
         <div>
           <span className="block text-xs font-bold text-[#06283D] mb-2">
-            1. Modalidade (1 toque)
+            2. Modalidade (1 toque)
           </span>
           <div className="flex flex-wrap gap-2">
-            {MODALITIES.map((m) => {
+            {MOVEMENT_MODALITIES.map((m) => {
               const selected = modality === m.id;
               return (
                 <button
@@ -376,20 +315,8 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
           </div>
         </div>
 
-        {/* Date, Duration, Calories, Distance */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <div>
-            <label htmlFor="ci-date" className="block text-xs font-semibold text-[#4A6578] mb-1">
-              Data
-            </label>
-            <input
-              id="ci-date"
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="w-full min-h-[44px] px-3 rounded-xl bg-[#F8F6F1] border border-[#E5E0D5] font-mono text-sm text-[#06283D]"
-            />
-          </div>
+        {/* Duration, Calories, Distance */}
+        <div className="grid grid-cols-3 gap-2.5">
           <div>
             <label htmlFor="ci-duration" className="block text-xs font-semibold text-[#4A6578] mb-1">
               Duração (min)
@@ -426,7 +353,7 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
           </div>
           <div>
             <label htmlFor="ci-distance" className="block text-xs font-semibold text-[#4A6578] mb-1">
-              Distância km (opcional)
+              Distância (km)
             </label>
             <input
               id="ci-distance"
@@ -434,17 +361,17 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
               inputMode="decimal"
               value={distanceKm}
               onChange={(e) => setDistanceKm(e.target.value)}
-              placeholder="Ex: 8,8"
+              placeholder="Opcional"
               className="w-full min-h-[44px] px-3 rounded-xl bg-[#F8F6F1] border border-[#E5E0D5] font-mono text-sm text-[#06283D]"
             />
           </div>
         </div>
 
         {/* Lumbar Before -> After & Effort */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 pt-1">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5">
           <div className="rounded-xl bg-[#F8F6F1] border border-[#E5E0D5] p-3.5">
             <div className="flex items-center justify-between text-xs font-semibold">
-              <label htmlFor="ci-lumbar-before">Lombar Antes (do Pré-Treino)</label>
+              <label htmlFor="ci-lumbar-before">Lombar Antes</label>
               <span className="font-mono font-bold text-[#06283D]">{lumbarBefore}/10</span>
             </div>
             <input
@@ -535,15 +462,15 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
             />
             <span className="text-xs font-semibold text-[#06283D] flex items-center gap-1.5">
               <Camera className="w-3.5 h-3.5 text-[#1363DF]" aria-hidden="true" />
-              <span>Gravei foto/vídeo @metaexplicada</span>
+              <span>Foto/vídeo @metaexplicada</span>
             </span>
           </label>
         </div>
 
-        {/* GPS Location */}
+        {/* Optional GPS Location */}
         <div>
           <label htmlFor="ci-location" className="block text-xs font-semibold text-[#4A6578] mb-1">
-            Localização (GPS ou manual)
+            Localização (opcional)
           </label>
           <div className="flex flex-col sm:flex-row gap-2">
             <input
@@ -565,13 +492,13 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
               ) : (
                 <MapPin className="w-4 h-4 text-[#1363DF]" />
               )}
-              <span>Pegar Localização GPS</span>
+              <span>Localização GPS</span>
             </button>
           </div>
           {gpsStatus && <p className="mt-1 text-[11px] text-[#5B7689]">{gpsStatus}</p>}
         </div>
 
-        {/* Note / Technical Win + Smart Text Parse Helper */}
+        {/* Note */}
         <div>
           <div className="flex items-center justify-between gap-2 mb-1">
             <label htmlFor="ci-note" className="text-xs font-semibold text-[#4A6578]">
@@ -580,10 +507,10 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
             {note.trim().length > 10 && (
               <button
                 type="button"
-                onClick={() => applyParsedVoice(note)}
+                onClick={() => applyNoteParse(note)}
                 className="text-xs font-bold text-[#1363DF] hover:underline cursor-pointer"
               >
-                Interpretar texto ditado
+                Interpretar texto
               </button>
             )}
           </div>
@@ -595,6 +522,9 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
             placeholder="Como respondeu a lombar? Qual evolução técnica você sentiu hoje?"
             className="w-full p-3.5 rounded-xl bg-[#F8F6F1] border border-[#E5E0D5] text-sm text-[#06283D] focus:outline-2 focus:outline-[#1363DF]"
           />
+          {parseFeedback && (
+            <p className="mt-1 text-[11px] font-medium text-[#1363DF]">{parseFeedback}</p>
+          )}
         </div>
 
         <button
@@ -602,7 +532,7 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
           className="w-full min-h-[52px] rounded-2xl bg-[#1363DF] hover:bg-[#0F52BD] active:scale-[0.99] text-white font-display font-bold text-sm flex items-center justify-center gap-2 transition-all cursor-pointer"
         >
           <Save className="w-4 h-4" aria-hidden="true" />
-          <span>Salvar Check-in na Jornada</span>
+          <span>Salvar Treino na Jornada</span>
         </button>
       </form>
     </div>

@@ -4,6 +4,8 @@ import {
   TOTAL_PROJECT_DAYS,
   formatDurationHoursMin,
   formatPtDate,
+  formatSleepBlocksSummary,
+  getSleepEntryTotalMinutes,
 } from './logic';
 
 function wrapText(
@@ -190,7 +192,7 @@ export async function renderStoryCanvas(
 
   const lumbarImproved = entry.lumbarAfter <= entry.lumbarBefore;
   const sleepLabel = sleepLog
-    ? `${formatDurationHoursMin(sleepLog.durationMinutes + sleepLog.napMinutes)} (${sleepLog.bedTime}→${sleepLog.wakeTime})`
+    ? `${formatDurationHoursMin(getSleepEntryTotalMinutes(sleepLog))} (${formatSleepBlocksSummary(sleepLog)})`
     : 'Não registrado';
 
   const metrics = [
@@ -269,7 +271,7 @@ export function buildStoryCaption(entry: CheckInEntry, sleepLog?: SleepEntry): s
   const dayPadded = String(entry.dayNumber).padStart(2, '0');
   const distPart = entry.distanceKm ? ` (${entry.distanceKm.toString().replace('.', ',')} km)` : '';
   const sleepPart = sleepLog
-    ? `\n😴 Sono: ${formatDurationHoursMin(sleepLog.durationMinutes + sleepLog.napMinutes)} (${sleepLog.bedTime} → ${sleepLog.wakeTime})`
+    ? `\n😴 Sono: ${formatDurationHoursMin(getSleepEntryTotalMinutes(sleepLog))} (${formatSleepBlocksSummary(sleepLog)}${sleepLog.fragmented ? ' · Sono picado' : ''})`
     : '';
   return [
     `🌊 DIA ${dayPadded}/${TOTAL_PROJECT_DAYS} — Operação Maldivas`,

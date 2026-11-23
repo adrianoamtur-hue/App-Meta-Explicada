@@ -15,7 +15,7 @@ export type Stance = 'Regular' | 'Goofy';
 
 export type EnergyLevel = 'Alta' | 'Moderada' | 'Baixa';
 
-export type SleepFeeling = 'Zerado' | 'Recuperando' | 'Médio' | 'Moído';
+export type SleepFeeling = 'Zerado' | 'Médio' | 'Moído' | 'Recuperando';
 
 export type TrafficLight = 'verde' | 'amarelo' | 'vermelho';
 
@@ -54,17 +54,28 @@ export interface CheckInEntry {
   createdAt: string;
 }
 
-export interface SleepEntry {
-  id: string;
-  date: string; // YYYY-MM-DD (morning date or record date)
-  nightLabel?: string; // e.g. "21/11 → 22/11/2026"
+export interface SleepBlock {
   bedTime: string; // HH:MM
   wakeTime: string; // HH:MM
   durationMinutes: number;
+}
+
+export interface SleepEntry {
+  id: string;
+  date: string; // YYYY-MM-DD
+  nightLabel?: string;
+  blocks: SleepBlock[];
+  totalMinutes: number;
+  fragmented: boolean; // Sono picado / acordei várias vezes à noite
   isNightShift: boolean;
   shiftNote?: string;
-  napMinutes: number;
   feeling: SleepFeeling;
+  note?: string;
+  // Legacy compatibility fields (optional)
+  bedTime?: string;
+  wakeTime?: string;
+  durationMinutes?: number;
+  napMinutes?: number;
 }
 
 export interface PreWorkoutState {
@@ -142,6 +153,40 @@ export interface VoiceParsedResult {
   calories?: number;
   hasMediaForInsta?: boolean;
   matchedFields: string[];
+}
+
+export interface UniversalVoiceParsed {
+  rawText: string;
+  targetDate: string; // YYYY-MM-DD
+  dateLabel: 'Hoje' | 'Ontem';
+  consciousRest?: {
+    enabled: boolean;
+    note: string;
+  };
+  workout?: {
+    modality: Modality;
+    isWellhub: boolean;
+    durationMin: number;
+    calories: number;
+    effort: number;
+    lumbarBefore: number;
+    lumbarAfter: number;
+    rightLegRadiation: boolean;
+    hasMediaForInsta: boolean;
+    note: string;
+  };
+  sleep?: {
+    blocks: SleepBlock[];
+    totalMinutes: number;
+    fragmented: boolean;
+    feeling: SleepFeeling;
+    note: string;
+  };
+  lumbarUpdate?: {
+    lumbarNow: number;
+    rightLegRadiation: boolean;
+  };
+  waterMl?: number;
 }
 
 export interface LiveForecastData {

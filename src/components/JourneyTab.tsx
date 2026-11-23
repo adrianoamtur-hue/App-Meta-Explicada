@@ -13,6 +13,8 @@ import {
   TOTAL_PROJECT_DAYS,
   formatDurationHoursMin,
   formatPtDate,
+  formatSleepBlocksSummary,
+  getSleepEntryTotalMinutes,
   validateBackupJson,
 } from '../utils/logic';
 import { buildStoryCaption, renderStoryCanvas } from '../utils/storyCanvas';
@@ -164,8 +166,15 @@ export const JourneyTab: React.FC<JourneyTabProps> = ({
     const sorted = Array.from(dates).sort();
     return sorted.slice(-10).map((d) => {
       const ci = state.checkIns.find((c) => c.date === d);
-      const sl = state.sleepLogs.find((s) => s.date === d) || state.sleepLogs[0];
-      const sleepHours = sl ? Number(((sl.durationMinutes + sl.napMinutes) / 60).toFixed(1)) : 6;
+      const daySleeps = state.sleepLogs.filter((s) => s.date === d);
+      const daySleepMinutes = daySleeps.reduce((acc, s) => acc + getSleepEntryTotalMinutes(s), 0);
+      const fallbackSleep = state.sleepLogs[0];
+      const sleepHours =
+        daySleepMinutes > 0
+          ? Number((daySleepMinutes / 60).toFixed(1))
+          : fallbackSleep
+            ? Number((getSleepEntryTotalMinutes(fallbackSleep) / 60).toFixed(1))
+            : 6;
       const lumbarAfter = ci ? ci.lumbarAfter : state.preWorkout.lumbarNow;
       return {
         date: d.slice(5).split('-').reverse().join('/'),
@@ -624,9 +633,9 @@ export const JourneyTab: React.FC<JourneyTabProps> = ({
         {/* Sleep Logs compact view */}
         {state.sleepLogs.length > 0 && (
           <div className="pt-3 border-t border-[#E5E0D5]">
-            <p className="text-xs font-bold text-[#06283D] mb-2">Histórico de Sono &amp; Escalas</p>
+            <p className="text-xs font-bold text-[#06283D] mb-2">Histórico Independente de Sono &amp; Escalas</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-              {state.sleepLogs.slice(0, 6).map((sl) => (
+              {state.sleepLogs.slice(0, 9).map((sl) => (
                 <div
                   key={sl.id}
                   className="rounded-xl bg-[#F8F6F1] border border-[#E5E0D5] p-3 text-xs text-[#284559]"
@@ -634,13 +643,18 @@ export const JourneyTab: React.FC<JourneyTabProps> = ({
                   <p className="font-bold text-[#06283D]">
                     {sl.nightLabel || formatPtDate(sl.date)} ·{' '}
                     <span className="font-mono text-[#1363DF]">
-                      {formatDurationHoursMin(sl.durationMinutes + sl.napMinutes)}
+                      {formatDurationHoursMin(getSleepEntryTotalMinutes(sl))}
                     </span>
                   </p>
-                  <p className="mt-0.5 text-[11px]">
-                    {sl.bedTime} → {sl.wakeTime} · {sl.feeling}
+                  <p className="mt-0.5 text-[11px] font-mono text-[#06283D]">
+                    {formatSleepBlocksSummary(sl)}
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-[#4A6578]">
+                    Acordou: <strong>{sl.feeling}</strong>
+                    {sl.fragmented ? ' · Sono picado' : ''}
                     {sl.shiftNote ? ` · ${sl.shiftNote}` : ''}
                   </p>
+                  {sl.note && <p className="mt-1 text-[11px] text-[#5B7689]">{sl.note}</p>}
                 </div>
               ))}
             </div>
