@@ -1,6 +1,8 @@
 import type {
   AppState,
+  BodyMeasurementEntry,
   CheckInEntry,
+  DetectedSleepSegment,
   EnergyLevel,
   Modality,
   ReadinessResult,
@@ -19,7 +21,10 @@ export const DEFAULT_LOGO_PATH = '/assets/aistudio/Meta_explicada_logo_076f791c.
 export const PROJECT_START_DATE = '2026-11-21'; // Day 01
 export const PROJECT_TARGET_DATE = '2027-08-01'; // Maldivas target
 export const TOTAL_PROJECT_DAYS = 273;
+export const DEFAULT_HEIGHT_CM = 172; // 1.72 m fixed height
 export const WATER_GOAL_ML = 3000;
+export const WAIST_TARGET_RATIO = 0.5;
+export const WAIST_TARGET_CM = Math.round(DEFAULT_HEIGHT_CM * WAIST_TARGET_RATIO); // 86 cm
 
 export function parseLocalDate(dateStr: string): Date {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -96,6 +101,64 @@ export function getProjectProgress(referenceDateStr?: string): {
   };
 }
 
+export function getLatestWeightKg(measurements: BodyMeasurementEntry[]): number | undefined {
+  for (const m of measurements) {
+    if (typeof m.weightKg === 'number' && m.weightKg > 30 && m.weightKg < 250) {
+      return m.weightKg;
+    }
+  }
+  return undefined;
+}
+
+export function getLatestWaistCm(measurements: BodyMeasurementEntry[]): number | undefined {
+  for (const m of measurements) {
+    if (typeof m.waistCm === 'number' && m.waistCm > 40 && m.waistCm < 200) {
+      return m.waistCm;
+    }
+  }
+  return undefined;
+}
+
+export function getDailyWaterGoalMl(latestWeightKg?: number): number {
+  if (typeof latestWeightKg === 'number' && latestWeightKg >= 40 && latestWeightKg <= 200) {
+    return Math.round(latestWeightKg * 38);
+  }
+  return WATER_GOAL_ML;
+}
+
+export function calculateBodyMetrics(
+  weightKg?: number,
+  waistCm?: number,
+  heightCm: number = DEFAULT_HEIGHT_CM
+): {
+  bmi?: number;
+  bmiLabel?: string;
+  waistToHeightRatio?: number;
+  waistStatus?: 'ideal' | 'atencao';
+} {
+  const heightM = heightCm / 100;
+  let bmi: number | undefined;
+  let bmiLabel: string | undefined;
+  if (typeof weightKg === 'number' && weightKg > 0 && heightM > 0) {
+    bmi = Number((weightKg / (heightM * heightM)).toFixed(1));
+    if (bmi < 18.5) bmiLabel = 'Abaixo do peso';
+    else if (bmi < 25) bmiLabel = 'Peso adequado';
+    else if (bmi < 30) bmiLabel = 'Sobrepeso';
+    else if (bmi < 35) bmiLabel = 'Obesidade Grau I';
+    else if (bmi < 40) bmiLabel = 'Obesidade Grau II';
+    else bmiLabel = 'Obesidade Grau III';
+  }
+
+  let waistToHeightRatio: number | undefined;
+  let waistStatus: 'ideal' | 'atencao' | undefined;
+  if (typeof waistCm === 'number' && waistCm > 0 && heightCm > 0) {
+    waistToHeightRatio = Number((waistCm / heightCm).toFixed(2));
+    waistStatus = waistToHeightRatio < WAIST_TARGET_RATIO ? 'ideal' : 'atencao';
+  }
+
+  return { bmi, bmiLabel, waistToHeightRatio, waistStatus };
+}
+
 export function calculateSleepDurationMinutes(bedTime: string, wakeTime: string): number {
   const [bh, bm] = bedTime.split(':').map(Number);
   const [wh, wm] = wakeTime.split(':').map(Number);
@@ -119,7 +182,12 @@ export function buildSleepBlock(bedTime: string, wakeTime: string): SleepBlock {
 }
 
 export function sumSleepBlocksMinutes(blocks: SleepBlock[]): number {
-  return blocks.reduce((acc, b) => acc + Math.max(0, b.durationMinutes || calculateSleepDurationMinutes(b.bedTime, b.wakeTime)), 0);
+  return blocks.reduce(
+    (acc, b) =>
+      acc +
+      Math.max(0, b.durationMinutes || calculateSleepDurationMinutes(b.bedTime, b.wakeTime)),
+    0
+  );
 }
 
 export function getSleepEntryTotalMinutes(entry: SleepEntry | undefined): number {
@@ -152,13 +220,16 @@ export function normalizeSleepEntry(raw: Partial<SleepEntry>): SleepEntry {
         : [buildSleepBlock('22:30', '06:00')];
 
   const baseTotal = sumSleepBlocksMinutes(blocks);
-  const legacyNap = typeof raw.napMinutes === 'number' && raw.napMinutes > 0 && !raw.blocks ? raw.napMinutes : 0;
+  const legacyNap =
+    typeof raw.napMinutes === 'number' && raw.napMinutes > 0 && !raw.blocks ? raw.napMinutes : 0;
   const totalMinutes = baseTotal + legacyNap;
 
   return {
     id: raw.id || `sleep-${Date.now()}`,
     date: raw.date || formatIsoDate(new Date()),
     nightLabel: raw.nightLabel,
+    kind: raw.kind || 'registered',
+    inBedTime: raw.inBedTime,
     blocks,
     totalMinutes,
     fragmented: Boolean(raw.fragmented),
@@ -283,9 +354,15 @@ const MODALITY_KCAL_PER_MIN: Record<Modality, number> = {
   'Descanso Consciente': 0,
 };
 
-export function estimateCalories(modality: Modality, durationMin: number): number {
+export function estimateCalories(
+  modality: Modality,
+  durationMin: number,
+  weightKg?: number
+): number {
   const safeMin = Math.max(0, durationMin);
-  return Math.round(safeMin * (MODALITY_KCAL_PER_MIN[modality] ?? 4.5));
+  const weightFactor =
+    typeof weightKg === 'number' && weightKg >= 40 && weightKg <= 180 ? weightKg / 78 : 1;
+  return Math.round(safeMin * (MODALITY_KCAL_PER_MIN[modality] ?? 4.5) * weightFactor);
 }
 
 export function parseVoiceCheckIn(transcript: string): VoiceParsedResult {
@@ -338,20 +415,26 @@ export function parseVoiceCheckIn(transcript: string): VoiceParsedResult {
     result.matchedFields.push('Modalidade: Areia / Orla');
   }
 
-  // Duration (e.g., "50 minutos", "1 hora e 20", "1h30", "1 hora e meia")
-  const halfHourMatch = text.match(/(\d+)\s*(?:horas|hora|h)\s*e\s*meia/);
-  const hourMinMatch = text.match(/(\d+)\s*(?:horas|hora|h)\s*(?:e\s*)?(\d+)?/);
-  const minMatch = text.match(/(\d+)\s*(?:min|minuto|minutos)\b/);
+  // Duration (avoid confusing clock hours like "22h" or "8 da manha" with duration)
+  const textWithoutClockTimes = text.replace(
+    /\b\d{1,2}(?::\d{2}|h\d{2})\b|\b\d{1,2}\s*(?:h|horas?)?\s*da\s+(?:manha|tarde|noite|madrugada)\b/g,
+    ' '
+  );
+  const halfHourMatch = textWithoutClockTimes.match(/(\d+)\s*(?:horas|hora|h)\s*e\s*meia/);
+  const hourMinMatch = textWithoutClockTimes.match(
+    /(?:por|durante|fiz|treinei)?\s*(\d)\s*(?:horas|hora)\s*(?:e\s*(\d{1,2}))?/
+  );
+  const minMatch = textWithoutClockTimes.match(/(\d{1,3})\s*(?:min|minuto|minutos)\b/);
   if (halfHourMatch) {
     const h = parseInt(halfHourMatch[1], 10);
-    if (!Number.isNaN(h)) {
+    if (!Number.isNaN(h) && h <= 6) {
       result.durationMin = h * 60 + 30;
       result.matchedFields.push(`Duração: ${result.durationMin} min`);
     }
   } else if (hourMinMatch) {
     const h = parseInt(hourMinMatch[1], 10);
     const m = hourMinMatch[2] ? parseInt(hourMinMatch[2], 10) : 0;
-    if (!Number.isNaN(h)) {
+    if (!Number.isNaN(h) && h <= 6) {
       result.durationMin = h * 60 + m;
       result.matchedFields.push(`Duração: ${result.durationMin} min`);
     }
@@ -372,7 +455,7 @@ export function parseVoiceCheckIn(transcript: string): VoiceParsedResult {
 
   // Lumbar Before / After or Single
   const rangeMatch = text.match(
-    /(?:lombar|dor|costas)?\s*(?:de|antes)\s*(?:estava\s*)?(?:em\s*)?(\d{1,2})\s*(?:para|pra|e\s*depois|depois|foi\s*para|caiu\s*para|a)\s*(\d{1,2})\b/
+    /(?:lombar|dor|costas)\s*(?:estava\s*)?(?:de|antes|em)?\s*(\d{1,2})\s*(?:para|pra|e\s*depois|depois|foi\s*para|caiu\s*para|a)\s*(\d{1,2})\b/
   );
   if (rangeMatch) {
     const before = Math.min(10, Math.max(0, parseInt(rangeMatch[1], 10)));
@@ -380,13 +463,17 @@ export function parseVoiceCheckIn(transcript: string): VoiceParsedResult {
     result.lumbarBefore = before;
     result.lumbarAfter = after;
     result.matchedFields.push(`Lombar: ${before} → ${after}`);
-  } else if (/\bsem\s*dor\b|lombar\s*(?:zerada|zero|otima|boa)/.test(text)) {
+  } else if (/\bsem\s*dor\b|lombar\s*(?:zerada|zero|otima|boa|tranquila)/.test(text)) {
     result.lumbarAfter = 0;
     result.matchedFields.push('Lombar: 0/10');
   } else {
     const beforeMatch = text.match(/(?:lombar\s*antes|antes)\s*(?:em\s*)?(\d{1,2})\b/);
-    const afterMatch = text.match(/(?:lombar\s*depois|depois|ficou\s*em|terminou\s*em)\s*(?:em\s*)?(\d{1,2})\b/);
-    const singleLumbar = text.match(/(?:lombar|dor\s*lombar|dor\s*nas\s*costas)\s*(?:em|nota|ta|esta|de)?\s*(\d{1,2})\b/);
+    const afterMatch = text.match(
+      /(?:lombar\s*depois|depois|ficou\s*em|terminou\s*em)\s*(?:em\s*)?(\d{1,2})\b/
+    );
+    const singleLumbar = text.match(
+      /(?:lombar|dor\s*lombar|dor\s*nas\s*costas)\s*(?:em|nota|ta|esta|de)?\s*(\d{1,2})\b/
+    );
     if (beforeMatch) {
       result.lumbarBefore = Math.min(10, Math.max(0, parseInt(beforeMatch[1], 10)));
       result.matchedFields.push(`Lombar antes: ${result.lumbarBefore}`);
@@ -411,7 +498,7 @@ export function parseVoiceCheckIn(transcript: string): VoiceParsedResult {
 
   // Right leg radiation
   const negRadiation =
-    /sem\s*(?:irradiacao|formigamento|choque|dor\s*na\s*perna)|nao\s*(?:irradiou|formigou)/.test(
+    /sem\s*(?:irradiacao|formigamento|choque|dor\s*na\s*perna|sinal\s*na\s*perna)|nao\s*(?:irradiou|formigou)|nenhum\s*(?:formigamento|sinal)/.test(
       text
     );
   const posRadiation =
@@ -434,7 +521,7 @@ export function parseVoiceCheckIn(transcript: string): VoiceParsedResult {
   return result;
 }
 
-function normalizeSpokenHour(
+export function normalizeSpokenHour(
   hourRaw: number,
   minRaw: number,
   period?: string,
@@ -458,62 +545,365 @@ function normalizeSpokenHour(
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-export function extractSleepBlocksFromText(normalizedText: string): SleepBlock[] {
-  const blocks: SleepBlock[] = [];
-  // Matches patterns like:
-  // "das 14 as 19", "das 22:15 ate 7:00", "2 da tarde ate 7", "10 da noite ate 7 da manha", "20h46 as 1h30"
-  const rangeRegex =
-    /(?:das?|de)?\s*(\d{1,2})(?:(?::|h)(\d{1,2}))?(?:\s*h(?:oras?)?)?\s*(da\s+manha|da\s+tarde|da\s+noite|da\s+madrugada)?\s*(?:as|ate\s+as|ate|a)\s*(\d{1,2})(?:(?::|h)(\d{1,2}))?(?:\s*h(?:oras?)?)?\s*(da\s+manha|da\s+tarde|da\s+noite|da\s+madrugada)?/gi;
+interface ParsedTimeToken {
+  hour: number;
+  min: number;
+  period: string;
+  raw: string;
+  index: number;
+  endIndex: number;
+}
 
+function parseSingleTimeToken(str: string): { hour: number; min: number; period: string } | null {
+  const s = str.trim();
+  if (/meia[\s-]?noite/.test(s)) return { hour: 0, min: 0, period: 'da madrugada' };
+  if (/meio[\s-]?dia/.test(s)) return { hour: 12, min: 0, period: 'da tarde' };
+  const m = s.match(
+    /^(\d{1,2})(?:(?::|h)(\d{1,2}))?(?:\s*h(?:oras?)?)?\s*(da\s+manha|da\s+tarde|da\s+noite|da\s+madrugada)?$/i
+  );
+  if (!m) return null;
+  const hour = parseInt(m[1], 10);
+  const min = m[2] ? parseInt(m[2], 10) : 0;
+  if (hour > 23 || min > 59) return null;
+  return { hour, min, period: (m[3] || '').toLowerCase() };
+}
+
+function findTimeTokens(clause: string): ParsedTimeToken[] {
+  const tokens: ParsedTimeToken[] = [];
+  const regex =
+    /\b(?:meia[\s-]?noite|meio[\s-]?dia|(\d{1,2})(?:(?::|h)(\d{1,2}))?(?:\s*h(?:oras?)?)?(?:\s*(da\s+manha|da\s+tarde|da\s+noite|da\s+madrugada))?)\b/gi;
   let match: RegExpExecArray | null;
-  while ((match = rangeRegex.exec(normalizedText)) !== null) {
-    const startH = parseInt(match[1], 10);
-    const startM = match[2] ? parseInt(match[2], 10) : 0;
-    const startPeriod = match[3] || '';
-    const endH = parseInt(match[4], 10);
-    const endM = match[5] ? parseInt(match[5], 10) : 0;
-    let endPeriod = match[6] || '';
-
-    // Avoid matching lumbar pain "de 4 para 2" (only match if preceded by sleep context or valid clock cues)
-    const beforeSnippet = normalizedText.slice(Math.max(0, match.index - 28), match.index);
-    const hasLumbarBefore = /(?:lombar|dor|costas|esforco)\s*$/.test(beforeSnippet);
+  while ((match = regex.exec(clause)) !== null) {
+    const raw = match[0];
+    // Skip bare small numbers that have no colon, no 'h', no period, and aren't preceded by time preposition
+    const hasExplicitClock =
+      raw.includes(':') ||
+      /\dh/.test(raw) ||
+      /hora|manha|tarde|noite|madrugada|meia|meio/.test(raw);
+    const before = clause.slice(Math.max(0, match.index - 22), match.index);
+    const after = clause.slice(match.index + raw.length, match.index + raw.length + 14);
+    const hasUnitAfter = /^\s*(?:ml|l\b|litro|kg|quilo|cm|min|minuto|copo|vezes|km|kcal|\/10)/.test(
+      after
+    );
+    if (hasUnitAfter) continue;
+    const hasLumbarBefore = /(?:lombar|dor|costas|esforco|nota|peso|cintura|abdomen)\s*(?:de|em|esta|ta|foi|para)?\s*$/.test(
+      before
+    );
     if (hasLumbarBefore) continue;
+    const hasTimeCueBefore =
+      /(?:as|a|das|da|de|ate|dormir|acordar|deitar|efetivo|acordei|dormi)\s*$/.test(before);
 
-    // Infer end period if user said "2 da tarde ate 7" (7 is also afternoon/evening = 19:00)
-    if (!endPeriod && startPeriod.includes('tarde') && endH > startH && endH <= 11) {
-      endPeriod = 'da tarde';
+    if (!hasExplicitClock && !hasTimeCueBefore) continue;
+
+    const parsed = parseSingleTimeToken(raw);
+    if (!parsed) continue;
+    tokens.push({
+      ...parsed,
+      raw,
+      index: match.index,
+      endIndex: match.index + raw.length,
+    });
+  }
+  return tokens;
+}
+
+export function extractSleepBlocksFromText(normalizedText: string): SleepBlock[] {
+  const segments = extractSleepSegmentsFromText(normalizedText, 'Médio', false, normalizedText);
+  return segments.flatMap((s) => s.blocks);
+}
+
+/**
+ * Turbocharged Portuguese sleep & shift window extractor.
+ * Handles multi-segment utterances like:
+ * "de ontem para hoje fui dormir às 10 da noite, efetivo 2:30 da manhã até 8 da manhã,
+ *  e agora estou indo dormir 9:15 e vou acordar 1:25 da manhã"
+ */
+export function extractSleepSegmentsFromText(
+  normalizedText: string,
+  defaultFeeling: SleepFeeling,
+  defaultFragmented: boolean,
+  originalNote: string
+): DetectedSleepSegment[] {
+  const segments: DetectedSleepSegment[] = [];
+
+  // Check if utterance splits into an upcoming sleep window clause ("e agora estou indo dormir...", "vou dormir...", "proxima escala...")
+  const upcomingSplitRegex =
+    /(?:,\s*e\s+|\.\s*|\be\s+)(?=(?:agora\s+)?(?:estou\s+indo\s+dormir|indo\s+dormir|vou\s+dormir|vou\s+deitar|proximo\s+sono|escala\s+agora))/i;
+
+  const rawClauses = normalizedText.split(upcomingSplitRegex).map((c) => c.trim()).filter(Boolean);
+
+  rawClauses.forEach((clause, clauseIdx) => {
+    const mentionsSleepInClause =
+      /\bdormi|\bsono\b|cochil|acord|deit|madrugada|efetivo|escala|noite\s*toda/.test(clause);
+    if (!mentionsSleepInClause) return;
+
+    const isUpcoming =
+      /estou\s+indo\s+dormir|indo\s+dormir|vou\s+dormir|vou\s+deitar|vou\s+acordar|proximo\s+sono/.test(
+        clause
+      );
+
+    // 1. Check for "fui dormir/deitar às X ... efetivo Y até Z" pattern inside this clause
+    let inBedTime: string | undefined;
+    let workingClause = clause;
+    const effectiveSplit = clause.match(
+      /^([\s\S]*?)(?:\b(?:sono\s+)?efetivo\b|\bso\s+peguei\s+no\s+sono\b|\bpeguei\s+no\s+sono\b)([\s\S]*)$/i
+    );
+    if (effectiveSplit) {
+      const preTokens = findTimeTokens(effectiveSplit[1]);
+      if (preTokens.length > 0) {
+        const t = preTokens[preTokens.length - 1];
+        const prePeriod =
+          t.period || (t.hour >= 6 && t.hour <= 11 ? 'da noite' : '');
+        inBedTime = normalizeSpokenHour(t.hour, t.min, prePeriod);
+      }
+      workingClause = effectiveSplit[2];
     }
-    // Infer if user said "10 da noite ate 7" (7 is morning)
-    if (!endPeriod && startPeriod.includes('noite') && endH <= 11 && endH < startH) {
-      endPeriod = 'da manha';
+
+    // 2. Extract explicit range pairs inside workingClause
+    const blocks: SleepBlock[] = [];
+    const rangeRegex =
+      /(?:das?|de|as|efetivo|dormir|dormi|deitar|deitei)?\s*(\d{1,2})(?:(?::|h)(\d{1,2}))?(?:\s*h(?:oras?)?)?\s*(da\s+manha|da\s+tarde|da\s+noite|da\s+madrugada)?\s*(?:as|ate\s+as|ate|a|e\s+(?:vou\s+)?acord(?:ar|ei)\s*(?:as)?|acord(?:ar|ei)\s*(?:as)?)\s*(\d{1,2})(?:(?::|h)(\d{1,2}))?(?:\s*h(?:oras?)?)?\s*(da\s+manha|da\s+tarde|da\s+noite|da\s+madrugada)?/gi;
+
+    let match: RegExpExecArray | null;
+    while ((match = rangeRegex.exec(workingClause)) !== null) {
+      const startH = parseInt(match[1], 10);
+      const startM = match[2] ? parseInt(match[2], 10) : 0;
+      let startPeriod = (match[3] || '').toLowerCase();
+      const endH = parseInt(match[4], 10);
+      const endM = match[5] ? parseInt(match[5], 10) : 0;
+      let endPeriod = (match[6] || '').toLowerCase();
+
+      const beforeSnippet = workingClause.slice(Math.max(0, match.index - 28), match.index);
+      if (/(?:lombar|dor|costas|esforco|nota)\s*$/.test(beforeSnippet)) continue;
+      if (startH > 23 || endH > 23 || startM > 59 || endM > 59) continue;
+
+      // Smart Brazilian Portuguese AM/PM disambiguation:
+      // - "9:15 ... acordar 1:25 da manhã" OR "indo dormir 9:15" -> 21:15
+      if (!startPeriod && startH >= 6 && startH <= 11) {
+        const wakeIsEarlyMorning =
+          endPeriod.includes('manha') ||
+          endPeriod.includes('madrugada') ||
+          (endH >= 0 && endH <= 6);
+        if (
+          isUpcoming ||
+          (wakeIsEarlyMorning && endH < startH) ||
+          /noite/.test(beforeSnippet)
+        ) {
+          startPeriod = 'da noite';
+        }
+      }
+
+      // - "2 da tarde ate 7" -> end is 19:00
+      if (!endPeriod && startPeriod.includes('tarde') && endH > startH && endH <= 11) {
+        endPeriod = 'da tarde';
+      }
+      // - "10 da noite ate 7" -> end is 07:00
+      if (!endPeriod && startPeriod.includes('noite') && endH <= 11 && endH < startH) {
+        endPeriod = 'da manha';
+      }
+
+      const bedTime = normalizeSpokenHour(startH, startM, startPeriod);
+      const wakeTime = normalizeSpokenHour(endH, endM, endPeriod);
+      const duration = calculateSleepDurationMinutes(bedTime, wakeTime);
+      if (duration >= 20 && duration <= 18 * 60) {
+        blocks.push({ bedTime, wakeTime, durationMinutes: duration });
+      }
     }
 
-    if (startH > 23 || endH > 23) continue;
+    // 3. Fallback if user gave 2 time tokens in clause without explicit connector matched above
+    if (blocks.length === 0) {
+      const tokens = findTimeTokens(workingClause);
+      if (tokens.length >= 2) {
+        const t1 = tokens[0];
+        const t2 = tokens[1];
+        let p1 = t1.period;
+        let p2 = t2.period;
+        if (!p1 && t1.hour >= 6 && t1.hour <= 11 && (isUpcoming || (t2.hour < t1.hour && t2.hour <= 6))) {
+          p1 = 'da noite';
+        }
+        if (!p2 && p1.includes('tarde') && t2.hour > t1.hour && t2.hour <= 11) {
+          p2 = 'da tarde';
+        }
+        const bedTime = normalizeSpokenHour(t1.hour, t1.min, p1);
+        const wakeTime = normalizeSpokenHour(t2.hour, t2.min, p2);
+        const duration = calculateSleepDurationMinutes(bedTime, wakeTime);
+        if (duration >= 20 && duration <= 18 * 60) {
+          blocks.push({ bedTime, wakeTime, durationMinutes: duration });
+        }
+      }
+    }
 
-    const bedTime = normalizeSpokenHour(startH, startM, startPeriod);
-    const wakeTime = normalizeSpokenHour(endH, endM, endPeriod);
-    const duration = calculateSleepDurationMinutes(bedTime, wakeTime);
-    if (duration >= 20 && duration <= 18 * 60) {
-      blocks.push({ bedTime, wakeTime, durationMinutes: duration });
+    if (blocks.length > 0) {
+      const totalMinutes = sumSleepBlocksMinutes(blocks);
+      const isNightShift =
+        isUpcoming ||
+        /escala|madrugada/.test(clause) ||
+        blocks.some((b) => {
+          const bh = parseInt(b.bedTime.split(':')[0], 10);
+          const wh = parseInt(b.wakeTime.split(':')[0], 10);
+          return (bh >= 12 && bh <= 19) || (wh >= 0 && wh <= 4);
+        });
+
+      const title = isUpcoming ? 'Próximo Sono / Escala' : 'Sono Registrado';
+      const noteBits: string[] = [];
+      if (inBedTime) noteBits.push(`Foi deitar às ${inBedTime}`);
+      if (isUpcoming) noteBits.push('Janela de escala / próximo sono');
+      const segmentNote = noteBits.length > 0 ? `${noteBits.join(' · ')}.` : originalNote;
+
+      segments.push({
+        id: `seg-${clauseIdx}-${Date.now()}`,
+        kind: isUpcoming ? 'upcoming_shift' : 'registered',
+        title,
+        inBedTime,
+        blocks,
+        totalMinutes,
+        fragmented: isUpcoming ? false : defaultFragmented,
+        feeling: isUpcoming ? 'Recuperando' : defaultFeeling,
+        isNightShift,
+        note: segmentNote,
+      });
+    }
+  });
+
+  return segments;
+}
+
+const KNOWN_MEDICATIONS: { pattern: RegExp; label: string }[] = [
+  { pattern: /\bdipirona\b/, label: 'Dipirona' },
+  { pattern: /\bibuprofeno\b/, label: 'Ibuprofeno' },
+  { pattern: /\bparacetamol\b/, label: 'Paracetamol' },
+  { pattern: /\btorsilax\b/, label: 'Torsilax' },
+  { pattern: /\bdorflex\b/, label: 'Dorflex' },
+  { pattern: /\btandrilax\b/, label: 'Tandrilax' },
+  { pattern: /\bmiosan\b|ciclobenzaprina/, label: 'Ciclobenzaprina (Miosan)' },
+  { pattern: /\bpregabalina\b/, label: 'Pregabalina' },
+  { pattern: /\bgabapentina\b/, label: 'Gabapentina' },
+  { pattern: /\btramadol\b/, label: 'Tramadol' },
+  { pattern: /\balginac\b/, label: 'Alginac' },
+  { pattern: /\barcox(?:ia)?\b|etoricoxib/, label: 'Arcoxia (Etoricoxibe)' },
+  { pattern: /\bcelebra\b|celecoxib/, label: 'Celebra' },
+  { pattern: /\bnimesulida\b/, label: 'Nimesulida' },
+  { pattern: /\bcetoprofeno\b/, label: 'Cetoprofeno' },
+  { pattern: /\bprednisona\b|corticoide/, label: 'Corticoide / Prednisona' },
+  { pattern: /anti[\s-]?inflamatorio/, label: 'Anti-inflamatório' },
+  { pattern: /relaxante\s*muscular/, label: 'Relaxante muscular' },
+  { pattern: /\bcreatina\b/, label: 'Creatina' },
+  { pattern: /\bwhey\b/, label: 'Whey Protein' },
+  { pattern: /\bmagnesio\b/, label: 'Magnésio' },
+  { pattern: /vitamina\s*d\b/, label: 'Vitamina D' },
+  { pattern: /vitamina\s*b12\b|\bb12\b/, label: 'Vitamina B12' },
+  { pattern: /omega\s*3/, label: 'Ômega 3' },
+  { pattern: /\bcolageno\b/, label: 'Colágeno' },
+  { pattern: /\bmelatonina\b/, label: 'Melatonina' },
+  { pattern: /\bcafeina\b/, label: 'Cafeína' },
+];
+
+function extractMedications(normalizedText: string): { name: string; timeApprox?: string }[] {
+  const found: { name: string; timeApprox?: string }[] = [];
+  const seen = new Set<string>();
+
+  for (const item of KNOWN_MEDICATIONS) {
+    const match = normalizedText.match(item.pattern);
+    if (match && !seen.has(item.label)) {
+      seen.add(item.label);
+      // Look around the match (±35 chars) for an approximate time like "às 8h" or "21:00"
+      const idx = match.index ?? 0;
+      const nearby = normalizedText.slice(Math.max(0, idx - 25), idx + match[0].length + 35);
+      const timeM = nearby.match(
+        /(?:as|a|por\s+volta\s+das?)?\s*(\d{1,2})(?:(?::|h)(\d{1,2}))?\s*(da\s+manha|da\s+tarde|da\s+noite|h\b)/i
+      );
+      let timeApprox: string | undefined;
+      if (timeM) {
+        const hh = parseInt(timeM[1], 10);
+        const mm = timeM[2] ? parseInt(timeM[2], 10) : 0;
+        const per = (timeM[3] || '').toLowerCase();
+        if (hh <= 23 && mm <= 59) {
+          timeApprox = normalizeSpokenHour(hh, mm, per === 'h' ? '' : per);
+        }
+      }
+      found.push({ name: item.label, timeApprox });
     }
   }
 
-  return blocks;
+  return found;
+}
+
+function extractMood(normalizedText: string): { summary: string; energy: EnergyLevel } | undefined {
+  const tags: string[] = [];
+  let energy: EnergyLevel = 'Moderada';
+
+  if (/energia\s*alta|muito\s*bem|animad[oa]|dispost[oa]|focad[oa]|motivad[oa]|otimo\s*humor|me\s*senti\s*(?:muito\s*)?bem/.test(normalizedText)) {
+    energy = 'Alta';
+    tags.push('Disposto / Energia alta');
+  }
+  if (/energia\s*baixa|sem\s*energia|exaust[oa]|esgotad[oa]|cansaco\s*fisico|cansaco\s*mental|cansad[oa]|pesad[oa]|sonolent[oa]/.test(normalizedText)) {
+    energy = 'Baixa';
+    tags.push('Cansaço / Energia baixa');
+  }
+  if (/estressad[oa]|ansios[oa]|irritad[oa]|sobrecarregad[oa]|mente\s*cheia/.test(normalizedText)) {
+    tags.push('Estresse / Ansiedade');
+  }
+  if (/calm[oa]|tranquil[oa]|equilibrad[oa]|humor\s*(?:bom|otimo|estavel)|me\s*senti\s*tranquil/.test(normalizedText)) {
+    tags.push('Calmo / Equilibrado');
+  }
+  if (/energia\s*(?:media|moderada)|mais\s*ou\s*menos/.test(normalizedText) && tags.length === 0) {
+    energy = 'Moderada';
+    tags.push('Energia moderada');
+  }
+
+  if (tags.length === 0) return undefined;
+  return { summary: tags.join(' · '), energy };
+}
+
+function extractBodyMeasurement(
+  normalizedText: string
+): { weightKg?: number; waistCm?: number } | undefined {
+  let weightKg: number | undefined;
+  let waistCm: number | undefined;
+
+  const weightMatch =
+    normalizedText.match(
+      /(?:peso|pesei|estou\s*com|to\s*com)\s*(?:de\s*)?(\d{2,3}(?:[.,]\d{1,2})?)\s*(?:kg|kilos?|quilos?)?\b/
+    ) ||
+    normalizedText.match(/(\d{2,3}(?:[.,]\d{1,2})?)\s*(?:kg|kilos?|quilos?)\b/);
+
+  if (weightMatch) {
+    const val = parseFloat(weightMatch[1].replace(',', '.'));
+    if (!Number.isNaN(val) && val >= 45 && val <= 190) {
+      weightKg = Number(val.toFixed(1));
+    }
+  }
+
+  const waistMatch = normalizedText.match(
+    /(?:cintura|abdomen|barriga|circunferencia)\s*(?:de|com|em|esta|ta)?\s*(\d{2,3}(?:[.,]\d)?)\s*(?:cm|centimetros?)?\b/
+  );
+  if (waistMatch) {
+    const val = parseFloat(waistMatch[1].replace(',', '.'));
+    if (!Number.isNaN(val) && val >= 50 && val <= 160) {
+      waistCm = Number(val.toFixed(1));
+    }
+  }
+
+  if (weightKg === undefined && waistCm === undefined) return undefined;
+  return { weightKg, waistCm };
 }
 
 export function parseUniversalVoiceDiary(
   rawText: string,
   todayIso: string,
-  defaultLumbarNow = 2
+  defaultLumbarNow = 2,
+  latestWeightKg?: number
 ): UniversalVoiceParsed {
   const text = rawText
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
 
-  const isYesterday = /\bontem\b/.test(text);
-  const targetDate = isYesterday ? shiftIsoDate(todayIso, -1) : todayIso;
-  const dateLabel: 'Hoje' | 'Ontem' = isYesterday ? 'Ontem' : 'Hoje';
+  // "de ontem para hoje" means the log is for TODAY (not yesterday!)
+  const mentionsYesterdayOnly =
+    /\bontem\b/.test(text) && !/de\s+ontem\s+(?:para|pra)\s+hoje|\bhoje\b|\bagora\b/.test(text);
+  const targetDate = mentionsYesterdayOnly ? shiftIsoDate(todayIso, -1) : todayIso;
+  const dateLabel: 'Hoje' | 'Ontem' = mentionsYesterdayOnly ? 'Ontem' : 'Hoje';
 
   const parsed: UniversalVoiceParsed = {
     rawText: rawText.trim(),
@@ -523,7 +913,9 @@ export function parseUniversalVoiceDiary(
 
   // 1. Water detection ("bebi 500ml", "1 litro", "2 copos", "tomei 750 ml")
   const mlMatch = text.match(/(?:bebi|tomei|agua|hidratacao)?\s*(\d{2,4})\s*ml\b/);
-  const literMatch = text.match(/(?:bebi|tomei|agua)\s*(?:de\s*)?(\d(?:[.,]\d)?)\s*(?:l|litro|litros)\b/);
+  const literMatch = text.match(
+    /(?:bebi|tomei|agua)\s*(?:de\s*)?(\d(?:[.,]\d)?)\s*(?:l|litro|litros)\b/
+  );
   const cupsMatch = text.match(/(?:bebi|tomei)?\s*(\d{1,2})\s*(?:copo|copos)\b/);
   if (mlMatch) {
     parsed.waterMl = parseInt(mlMatch[1], 10);
@@ -545,10 +937,9 @@ export function parseUniversalVoiceDiary(
     };
   }
 
-  // 3. Sleep detection (independent of workout!)
+  // 3. Sleep & Shifts detection (multiple independent segments!)
   const mentionsSleep =
-    /\bdormi\b|\bsono\b|cochilo|cochilei|acordei|madrugada|noite\s*toda/.test(text);
-  const sleepBlocks = mentionsSleep ? extractSleepBlocksFromText(text) : [];
+    /\bdormi|\bsono\b|cochil|acord|deit|madrugada|noite\s*toda|escala/.test(text);
   const fragmented =
     /sono\s*picado|acordei\s*(?:varias|algumas|muitas)\s*vezes|dormi\s*picado|picado|interrompido/.test(
       text
@@ -556,38 +947,75 @@ export function parseUniversalVoiceDiary(
   let sleepFeeling: SleepFeeling | undefined;
   if (/\bmoido\b|\bmoida\b|destruido|acabado|cansado/.test(text)) {
     sleepFeeling = 'Moído';
-  } else if (/\bzerado\b|\bzerada\b|otimo|renovado|descansado/.test(text)) {
+  } else if (/\bzerado\b|\bzerada\b|renovado|descansado/.test(text)) {
     sleepFeeling = 'Zerado';
   } else if (/\bmedio\b|mais\s*ou\s*menos|razoavel/.test(text)) {
     sleepFeeling = 'Médio';
   }
 
-  if (sleepBlocks.length > 0 || (mentionsSleep && (fragmented || sleepFeeling))) {
-    const finalBlocks =
-      sleepBlocks.length > 0 ? sleepBlocks : [buildSleepBlock('22:30', '06:00')];
+  const sleepSegments = mentionsSleep
+    ? extractSleepSegmentsFromText(
+        text,
+        sleepFeeling || (fragmented ? 'Moído' : 'Médio'),
+        fragmented,
+        rawText.trim()
+      )
+    : [];
+
+  if (sleepSegments.length > 0) {
+    parsed.sleepSegments = sleepSegments;
     parsed.sleep = {
-      blocks: finalBlocks,
-      totalMinutes: sumSleepBlocksMinutes(finalBlocks),
+      blocks: sleepSegments[0].blocks,
+      totalMinutes: sleepSegments[0].totalMinutes,
+      fragmented: sleepSegments[0].fragmented,
+      feeling: sleepSegments[0].feeling,
+      note: sleepSegments[0].note,
+    };
+  } else if (mentionsSleep && (fragmented || sleepFeeling)) {
+    const fallbackSeg: DetectedSleepSegment = {
+      id: `seg-fallback-${Date.now()}`,
+      kind: 'registered',
+      title: 'Sono Registrado',
+      blocks: [buildSleepBlock('22:30', '06:00')],
+      totalMinutes: 450,
       fragmented,
-      feeling: sleepFeeling || (fragmented ? 'Moído' : 'Médio'),
+      feeling: sleepFeeling || 'Moído',
+      isNightShift: false,
       note: rawText.trim(),
+    };
+    parsed.sleepSegments = [fallbackSeg];
+    parsed.sleep = {
+      blocks: fallbackSeg.blocks,
+      totalMinutes: fallbackSeg.totalMinutes,
+      fragmented: fallbackSeg.fragmented,
+      feeling: fallbackSeg.feeling,
+      note: fallbackSeg.note,
     };
   }
 
-  // 4. Workout / Movement detection (strictly distinct from Descanso Consciente and Sleep)
+  // 4. Body Measurement (Weight / Waist)
+  const bodyMeasurement = extractBodyMeasurement(text);
+  if (bodyMeasurement) {
+    parsed.bodyMeasurement = bodyMeasurement;
+  }
+  const effectiveWeight = bodyMeasurement?.weightKg ?? latestWeightKg;
+
+  // 5. Workout / Movement detection
   const checkInBits = parseVoiceCheckIn(rawText);
   const hasRealWorkoutModality =
     checkInBits.modality && checkInBits.modality !== 'Descanso Consciente';
 
   if (hasRealWorkoutModality && checkInBits.modality) {
-    const durationMin = checkInBits.durationMin ?? (checkInBits.modality === 'Fluxo Chinês' ? 16 : 45);
+    const durationMin =
+      checkInBits.durationMin ?? (checkInBits.modality === 'Fluxo Chinês' ? 16 : 45);
     const lumbarBefore = checkInBits.lumbarBefore ?? defaultLumbarNow;
     const lumbarAfter = checkInBits.lumbarAfter ?? lumbarBefore;
     parsed.workout = {
       modality: checkInBits.modality,
       isWellhub: Boolean(checkInBits.isWellhub || checkInBits.modality === 'Wellhub — Pilates'),
       durationMin,
-      calories: checkInBits.calories ?? estimateCalories(checkInBits.modality, durationMin),
+      calories:
+        checkInBits.calories ?? estimateCalories(checkInBits.modality, durationMin, effectiveWeight),
       effort: checkInBits.effort ?? 3,
       lumbarBefore,
       lumbarAfter,
@@ -597,7 +1025,7 @@ export function parseUniversalVoiceDiary(
     };
   }
 
-  // 5. Standalone Lumbar Pain Update (if mentioned without or alongside anything)
+  // 6. Lumbar Pain Update
   if (
     checkInBits.lumbarAfter !== undefined ||
     checkInBits.lumbarBefore !== undefined ||
@@ -609,7 +1037,101 @@ export function parseUniversalVoiceDiary(
     };
   }
 
+  // 7. Medications & Supplements
+  const medications = extractMedications(text);
+  if (medications.length > 0) {
+    parsed.medications = medications;
+  }
+
+  // 8. Mood / How I felt
+  const mood = extractMood(text);
+  if (mood) {
+    parsed.mood = mood;
+  }
+
   return parsed;
+}
+
+export function buildPrivateDatabaseReport(state: AppState, daysWindow: 7 | 30): string {
+  const todayIso = formatIsoDate(new Date());
+  const cutoffIso = shiftIsoDate(todayIso, -(daysWindow - 1));
+  const latestWeight = getLatestWeightKg(state.bodyMeasurements);
+  const latestWaist = getLatestWaistCm(state.bodyMeasurements);
+  const metrics = calculateBodyMetrics(latestWeight, latestWaist, state.profileHeightCm);
+  const waterGoal = getDailyWaterGoalMl(latestWeight);
+
+  const lines: string[] = [
+    `RELATÓRIO CLÍNICO PRIVADO — OPERAÇÃO MALDIVAS (@metaexplicada)`,
+    `Período: últimos ${daysWindow} dias (desde ${formatPtDate(cutoffIso)} até ${formatPtDate(todayIso)})`,
+    `Perfil: Altura ${(state.profileHeightCm / 100).toFixed(2).replace('.', ',')} m | Base: ${state.stance} | Meta Água: ${waterGoal} ml/dia`,
+    `Escudo L4-S1 (RM 03/02/2026): L5-S1 extrusão 13 mm + Modic 1 | L4-L5 contato raiz D L5 | Retrolistese L5`,
+    '',
+  ];
+
+  if (latestWeight || latestWaist) {
+    lines.push('=== PESO & MEDIDAS ===');
+    lines.push(
+      `Peso: ${latestWeight ? `${latestWeight.toString().replace('.', ',')} kg` : '--'} | Cintura: ${latestWaist ? `${latestWaist.toString().replace('.', ',')} cm` : '--'} (meta < ${WAIST_TARGET_CM} cm) | IMC: ${metrics.bmi ?? '--'} (${metrics.bmiLabel || '--'}) | Cintura/Altura: ${metrics.waistToHeightRatio ?? '--'}`
+    );
+    lines.push('');
+  }
+
+  const recentSleeps = state.sleepLogs.filter((s) => s.date >= cutoffIso);
+  lines.push(`=== SONO & ESCALAS (${recentSleeps.length}) ===`);
+  if (recentSleeps.length === 0) {
+    lines.push('Sem registros no período.');
+  } else {
+    for (const s of recentSleeps) {
+      const kindTag = s.kind === 'upcoming_shift' ? '[Próxima Escala]' : '[Registrado]';
+      lines.push(
+        `- ${formatPtDate(s.date)} ${kindTag}: ${formatSleepBlocksSummary(s)} (${formatDurationHoursMin(getSleepEntryTotalMinutes(s))})${s.inBedTime ? ` · Deitou ${s.inBedTime}` : ''} · ${s.feeling}${s.fragmented ? ' · Sono picado' : ''}${s.note ? ` — ${s.note}` : ''}`
+      );
+    }
+  }
+  lines.push('');
+
+  const recentCheckIns = state.checkIns.filter((c) => c.date >= cutoffIso);
+  lines.push(`=== TREINOS & LOMBAR (${recentCheckIns.length}) ===`);
+  if (recentCheckIns.length === 0) {
+    lines.push('Sem registros no período.');
+  } else {
+    for (const c of recentCheckIns) {
+      lines.push(
+        `- DIA ${String(c.dayNumber).padStart(2, '0')} (${formatPtDate(c.date)}): ${c.modality} · ${c.durationMin} min · ${c.calories} kcal · Lombar ${c.lumbarBefore}/10 → ${c.lumbarAfter}/10${c.rightLegRadiation ? ' [ALERTA RAIZ D L5]' : ''} · "${c.note}"`
+      );
+    }
+  }
+  lines.push('');
+
+  const recentMeds = state.medicationLogs.filter((m) => m.date >= cutoffIso);
+  if (recentMeds.length > 0) {
+    lines.push(`=== REMÉDIOS & SUPLEMENTOS (${recentMeds.length}) ===`);
+    for (const m of recentMeds) {
+      lines.push(
+        `- ${formatPtDate(m.date)}${m.timeApprox ? ` (${m.timeApprox})` : ''}: ${m.name}${m.note ? ` — ${m.note}` : ''}`
+      );
+    }
+    lines.push('');
+  }
+
+  const recentMoods = state.moodLogs.filter((m) => m.date >= cutoffIso);
+  if (recentMoods.length > 0) {
+    lines.push(`=== COMO ME SENTI / ENERGIA (${recentMoods.length}) ===`);
+    for (const m of recentMoods) {
+      lines.push(`- ${formatPtDate(m.date)}: ${m.summary} (Energia: ${m.energy}) — "${m.note}"`);
+    }
+    lines.push('');
+  }
+
+  const recentVoice = state.voiceDiaryLogs.filter((v) => v.date >= cutoffIso);
+  if (recentVoice.length > 0) {
+    lines.push(`=== TRANSCRIÇÕES ORIGINAIS (${recentVoice.length}) ===`);
+    for (const v of recentVoice) {
+      lines.push(`- ${formatPtDate(v.date)}: "${v.rawText}"`);
+    }
+  }
+
+  return lines.join('\n').trim();
 }
 
 export function degToCompass(deg: number | null): string {
@@ -668,7 +1190,7 @@ export function evaluateSurfGasoline(params: {
   };
 }
 
-// Seeded milestone records (Days 01, 02, 03)
+// Seeded milestone records (Days 01 to 04)
 export function getSeedCheckIns(): CheckInEntry[] {
   return [
     {
@@ -711,20 +1233,48 @@ export function getSeedCheckIns(): CheckInEntry[] {
 export function getSeedSleepLogs(): SleepEntry[] {
   return [
     {
+      id: 'sleep-day-04-shift',
+      date: '2026-11-24',
+      nightLabel: 'Dia 04 — Escala Madrugada (24/11 → 25/11/2026)',
+      kind: 'upcoming_shift',
+      blocks: [buildSleepBlock('21:15', '01:25')],
+      totalMinutes: 250, // 4h10min
+      fragmented: false,
+      isNightShift: true,
+      shiftNote: 'Janela de Escala da Madrugada',
+      feeling: 'Recuperando',
+      note: 'Indo dormir às 21:15 para acordar às 01:25 (4h10min).',
+    },
+    {
+      id: 'sleep-day-04-night',
+      date: '2026-11-24',
+      nightLabel: 'Dia 04 — Noite 23/11 → 24/11/2026',
+      kind: 'registered',
+      inBedTime: '22:00',
+      blocks: [buildSleepBlock('02:30', '08:00')],
+      totalMinutes: 330, // 5h30min
+      fragmented: false,
+      isNightShift: false,
+      feeling: 'Médio',
+      note: 'Foi deitar às 22:00; sono efetivo das 02:30 → 08:00 (5h30min).',
+    },
+    {
       id: 'sleep-day-03',
       date: '2026-11-23',
-      nightLabel: 'Noite 22/11 → 23/11/2026 (Dia 03)',
+      nightLabel: 'Dia 03 — Noite 22/11 → 23/11/2026',
+      kind: 'registered',
       blocks: [buildSleepBlock('22:15', '07:00')],
       totalMinutes: 525, // 8h45min
       fragmented: true,
       isNightShift: false,
       feeling: 'Moído',
-      note: 'Sono noturno picado — acordou algumas vezes à noite.',
+      note: 'Sono noturno picado — acordou várias vezes à noite.',
     },
     {
       id: 'sleep-day-02-daytime',
       date: '2026-11-22',
       nightLabel: 'Dia 02 (22/11/2026 — Bloco diurno)',
+      kind: 'registered',
       blocks: [buildSleepBlock('14:00', '19:00')],
       totalMinutes: 300, // 5h00min
       fragmented: false,
@@ -737,6 +1287,7 @@ export function getSeedSleepLogs(): SleepEntry[] {
       id: 'sleep-day-01',
       date: '2026-11-21',
       nightLabel: 'Dia 01 (21/11 → 22/11/2026 — Madrugada)',
+      kind: 'registered',
       blocks: [buildSleepBlock('20:46', '01:30')],
       totalMinutes: 284, // 4h44min
       fragmented: false,
@@ -750,16 +1301,17 @@ export function getSeedSleepLogs(): SleepEntry[] {
 
 export function createInitialState(): AppState {
   return {
-    version: 32,
+    version: 33,
+    profileHeightCm: DEFAULT_HEIGHT_CM,
     stance: 'Regular',
     customLogoDataUrl: null,
     preWorkout: {
-      date: '2026-11-23',
+      date: '2026-11-24',
       lumbarNow: 2,
       energy: 'Moderada',
       rightLegRadiation: false,
-      quickNote: 'Dia 03: sono noturno picado (22:15→07:00, acordou moído). Avaliar estímulo leve.',
-      updatedAt: '2026-11-23T07:30:00.000Z',
+      quickNote: 'Dia 04: sono efetivo 02:30→08:00 (5h30min) + escala madrugada 21:15→01:25.',
+      updatedAt: '2026-11-24T09:00:00.000Z',
     },
     dailyHabitsByDate: {
       '2026-11-21': {
@@ -773,13 +1325,22 @@ export function createInitialState(): AppState {
         consciousRest: true,
       },
       '2026-11-23': {
-        waterMl: 750,
+        waterMl: 2000,
+        breathingDone: false,
+        consciousRest: false,
+      },
+      '2026-11-24': {
+        waterMl: 1000,
         breathingDone: false,
         consciousRest: false,
       },
     },
     sleepLogs: getSeedSleepLogs(),
     checkIns: getSeedCheckIns(),
+    medicationLogs: [],
+    moodLogs: [],
+    bodyMeasurements: [],
+    voiceDiaryLogs: [],
     completedSetsByDate: {},
     mySpots: [
       {
@@ -856,7 +1417,7 @@ export function loadState(): AppState {
 export function mergeWithDefaultState(parsed: Partial<AppState>): AppState {
   const defaults = createInitialState();
 
-  // Normalize existing sleep logs and ensure Day 01, Day 02, Day 03 exist non-destructively
+  // Normalize existing sleep logs and ensure Days 01..04 exist non-destructively
   const existingSleeps: SleepEntry[] = Array.isArray(parsed.sleepLogs)
     ? parsed.sleepLogs.map((s) => normalizeSleepEntry(s))
     : [];
@@ -876,7 +1437,7 @@ export function mergeWithDefaultState(parsed: Partial<AppState>): AppState {
   }
   mergedSleeps.sort((a, b) => b.date.localeCompare(a.date));
 
-  // Preserve existing check-ins and ensure Day 01 + Day 02 (Descanso Consciente) exist non-destructively
+  // Preserve existing check-ins and ensure Day 01 + Day 02 exist non-destructively
   const existingCheckIns: CheckInEntry[] = Array.isArray(parsed.checkIns)
     ? [...parsed.checkIns]
     : [];
@@ -892,7 +1453,7 @@ export function mergeWithDefaultState(parsed: Partial<AppState>): AppState {
   }
   existingCheckIns.sort((a, b) => b.date.localeCompare(a.date));
 
-  // Merge daily habits non-destructively (ensure Day 01 breathing & Day 02 consciousRest are marked)
+  // Merge daily habits non-destructively
   const existingHabits =
     parsed.dailyHabitsByDate && typeof parsed.dailyHabitsByDate === 'object'
       ? { ...parsed.dailyHabitsByDate }
@@ -909,18 +1470,29 @@ export function mergeWithDefaultState(parsed: Partial<AppState>): AppState {
   };
 
   return {
-    version: 32,
+    version: 33,
+    profileHeightCm: DEFAULT_HEIGHT_CM,
     stance: parsed.stance === 'Goofy' ? 'Goofy' : 'Regular',
-    customLogoDataUrl: typeof parsed.customLogoDataUrl === 'string' ? parsed.customLogoDataUrl : null,
-    preWorkout: parsed.preWorkout ? { ...defaults.preWorkout, ...parsed.preWorkout } : defaults.preWorkout,
+    customLogoDataUrl:
+      typeof parsed.customLogoDataUrl === 'string' ? parsed.customLogoDataUrl : null,
+    preWorkout: parsed.preWorkout
+      ? { ...defaults.preWorkout, ...parsed.preWorkout }
+      : defaults.preWorkout,
     dailyHabitsByDate: existingHabits,
     sleepLogs: mergedSleeps,
     checkIns: existingCheckIns,
+    medicationLogs: Array.isArray(parsed.medicationLogs) ? parsed.medicationLogs : [],
+    moodLogs: Array.isArray(parsed.moodLogs) ? parsed.moodLogs : [],
+    bodyMeasurements: Array.isArray(parsed.bodyMeasurements) ? parsed.bodyMeasurements : [],
+    voiceDiaryLogs: Array.isArray(parsed.voiceDiaryLogs) ? parsed.voiceDiaryLogs : [],
     completedSetsByDate:
       parsed.completedSetsByDate && typeof parsed.completedSetsByDate === 'object'
         ? parsed.completedSetsByDate
         : {},
-    mySpots: Array.isArray(parsed.mySpots) && parsed.mySpots.length > 0 ? parsed.mySpots : defaults.mySpots,
+    mySpots:
+      Array.isArray(parsed.mySpots) && parsed.mySpots.length > 0
+        ? parsed.mySpots
+        : defaults.mySpots,
     coachEvaluations:
       Array.isArray(parsed.coachEvaluations) && parsed.coachEvaluations.length > 0
         ? parsed.coachEvaluations
@@ -928,14 +1500,19 @@ export function mergeWithDefaultState(parsed: Partial<AppState>): AppState {
   };
 }
 
-export function validateBackupJson(jsonText: string): { ok: true; state: AppState } | { ok: false; error: string } {
+export function validateBackupJson(
+  jsonText: string
+): { ok: true; state: AppState } | { ok: false; error: string } {
   try {
     const parsed = JSON.parse(jsonText);
     if (!parsed || typeof parsed !== 'object') {
       return { ok: false, error: 'Arquivo JSON inválido.' };
     }
     if (!Array.isArray(parsed.checkIns) && !Array.isArray(parsed.sleepLogs)) {
-      return { ok: false, error: 'O arquivo não parece ser um backup válido do Operação Maldivas.' };
+      return {
+        ok: false,
+        error: 'O arquivo não parece ser um backup válido do Operação Maldivas.',
+      };
     }
     return { ok: true, state: mergeWithDefaultState(parsed as Partial<AppState>) };
   } catch {
@@ -944,7 +1521,9 @@ export function validateBackupJson(jsonText: string): { ok: true; state: AppStat
 }
 
 export function getLast28Days(referenceDateStr?: string): string[] {
-  const ref = referenceDateStr ? parseLocalDate(referenceDateStr) : parseLocalDate(formatIsoDate(new Date()));
+  const ref = referenceDateStr
+    ? parseLocalDate(referenceDateStr)
+    : parseLocalDate(formatIsoDate(new Date()));
   const days: string[] = [];
   for (let i = 27; i >= 0; i--) {
     const d = new Date(ref.getTime() - i * 86_400_000);

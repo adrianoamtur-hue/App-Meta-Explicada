@@ -3,22 +3,29 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, WifiOff } from 'lucide-react';
 import type {
   AppState,
+  BodyMeasurementEntry,
   CheckInEntry,
   CoachEvaluation,
   MainTab,
+  MedicationEntry,
+  MoodEntry,
   PreWorkoutState,
   SleepEntry,
   Stance,
   SurfSpot,
   UniversalVoiceParsed,
+  VoiceDiaryEntry,
 } from './types';
 import {
+  DEFAULT_HEIGHT_CM,
   STORAGE_KEY,
+  calculateBodyMetrics,
   formatIsoDate,
+  getLatestWeightKg,
   getProjectProgress,
   loadState,
 } from './utils/logic';
@@ -28,8 +35,8 @@ import { BottomNav } from './components/BottomNav';
 import { PilatesDossierModal } from './components/PilatesDossierModal';
 import { SleepDrawerModal } from './components/SleepDrawerModal';
 import { QuickRestModal } from './components/QuickRestModal';
-import { QuickWorkoutModal } from './components/QuickWorkoutModal';
 import { UniversalVoiceModal } from './components/UniversalVoiceModal';
+import { PrivateDatabaseModal } from './components/PrivateDatabaseModal';
 import { TodayTab } from './components/TodayTab';
 import { WorkoutsTab } from './components/WorkoutsTab';
 import { CheckInTab } from './components/CheckInTab';
@@ -45,18 +52,24 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<MainTab>('hoje');
   const [pilatesModalOpen, setPilatesModalOpen] = useState(false);
 
-  // Independent Quick Action Modals
+  // Modals
   const [voiceModalOpen, setVoiceModalOpen] = useState(false);
   const [sleepModalOpen, setSleepModalOpen] = useState(false);
   const [restModalOpen, setRestModalOpen] = useState(false);
-  const [workoutModalOpen, setWorkoutModalOpen] = useState(false);
+  const [privateDbOpen, setPrivateDbOpen] = useState(false);
+  const [openCheckInManual, setOpenCheckInManual] = useState(false);
 
-  // Brief feedback toast after modal save
+  // Brief feedback toast after save
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
 
   const isOnline = useOnlineStatus();
   const todayIso = formatIsoDate(new Date());
+
+  const latestWeightKg = useMemo(
+    () => getLatestWeightKg(state.bodyMeasurements),
+    [state.bodyMeasurements]
+  );
 
   const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
@@ -65,7 +78,7 @@ export default function App() {
     }
     toastTimerRef.current = window.setTimeout(() => {
       setToastMessage(null);
-    }, 3800);
+    }, 4200);
   }, []);
 
   // Persist every change automatically to localStorage ('metaexplicada_v31')
@@ -198,7 +211,18 @@ export default function App() {
           checkIns: sortByDateDesc([restEntry, ...filtered]),
         };
       });
-      showToast('Descanso Consciente salvo na correntinha!');
+      showToast('Descanso Consciente salvo no banco de dados!');
+    },
+    [showToast]
+  );
+
+  const handleAddMeasurement = useCallback(
+    (entry: BodyMeasurementEntry) => {
+      setState((prev) => ({
+        ...prev,
+        bodyMeasurements: sortByDateDesc([entry, ...prev.bodyMeasurements]),
+      }));
+      showToast('Peso / medidas salvos no Banco Privado!');
     },
     [showToast]
   );
@@ -237,18 +261,22 @@ export default function App() {
     [showToast]
   );
 
-  // Universal Voice Diary Confirmation — saves each detected entity independently
+  // Universal Voice Diary Confirmation — saves verbatim transcript + EVERY detected structured entity independently
   const handleConfirmUniversalVoice = useCallback(
     (parsed: UniversalVoiceParsed) => {
       const targetDate = parsed.targetDate;
       const { currentDay } = getProjectProgress(targetDate);
       const savedLabels: string[] = [];
+      const nowIso = new Date().toISOString();
 
       setState((prev) => {
         let nextSleepLogs = prev.sleepLogs;
         let nextCheckIns = prev.checkIns;
         let nextHabitsByDate = prev.dailyHabitsByDate;
         let nextPreWorkout = prev.preWorkout;
+        let nextMedLogs = prev.medicationLogs;
+        let nextMoodLogs = prev.moodLogs;
+        let nextBodyMeasurements = prev.bodyMeasurements;
 
         const curHabits = nextHabitsByDate[targetDate] || {
           waterMl: 0,
@@ -258,25 +286,29 @@ export default function App() {
         let updatedHabits = { ...curHabits };
         let habitsChanged = false;
 
-        if (parsed.sleep && parsed.sleep.blocks.length > 0) {
-          const isNightShift = parsed.sleep.blocks.some((b) => {
-            const h = parseInt(b.bedTime.split(':')[0], 10);
-            return h >= 12 && h <= 19;
-          });
-          const sleepEntry: SleepEntry = {
-            id: `sleep-voice-${Date.now()}`,
+        // 1. Multiple Sleep / Shift Segments
+        if (parsed.sleepSegments && parsed.sleepSegments.length > 0) {
+          const newSleepEntries: SleepEntry[] = parsed.sleepSegments.map((seg, idx) => ({
+            id: `sleep-voice-${Date.now()}-${idx}`,
             date: targetDate,
-            blocks: parsed.sleep.blocks,
-            totalMinutes: parsed.sleep.totalMinutes,
-            fragmented: parsed.sleep.fragmented,
-            isNightShift,
-            feeling: parsed.sleep.feeling,
-            note: parsed.sleep.note || parsed.rawText,
-          };
-          nextSleepLogs = sortByDateDesc([sleepEntry, ...nextSleepLogs]);
-          savedLabels.push('Sono');
+            nightLabel: `${seg.title} (${targetDate.slice(5).split('-').reverse().join('/')})`,
+            kind: seg.kind,
+            inBedTime: seg.inBedTime,
+            blocks: seg.blocks,
+            totalMinutes: seg.totalMinutes,
+            fragmented: seg.fragmented,
+            isNightShift: seg.isNightShift,
+            shiftNote: seg.kind === 'upcoming_shift' ? 'Janela de Escala da Madrugada' : undefined,
+            feeling: seg.feeling,
+            note: seg.note,
+          }));
+          nextSleepLogs = sortByDateDesc([...newSleepEntries, ...nextSleepLogs]);
+          savedLabels.push(
+            newSleepEntries.length > 1 ? `Sono/Escalas (${newSleepEntries.length})` : 'Sono'
+          );
         }
 
+        // 2. Workout
         if (parsed.workout) {
           const w = parsed.workout;
           const workoutEntry: CheckInEntry = {
@@ -294,12 +326,13 @@ export default function App() {
             location: 'João Pessoa - PB',
             note: w.note || parsed.rawText,
             hasMediaForInsta: w.hasMediaForInsta,
-            createdAt: new Date().toISOString(),
+            createdAt: nowIso,
           };
           nextCheckIns = sortByDateDesc([workoutEntry, ...nextCheckIns]);
           savedLabels.push(`Treino (${w.modality})`);
         }
 
+        // 3. Conscious Rest
         if (parsed.consciousRest?.enabled) {
           updatedHabits.consciousRest = true;
           habitsChanged = true;
@@ -317,7 +350,7 @@ export default function App() {
             location: 'João Pessoa - PB',
             note: parsed.consciousRest.note || parsed.rawText,
             hasMediaForInsta: false,
-            createdAt: new Date().toISOString(),
+            createdAt: nowIso,
           };
           nextCheckIns = sortByDateDesc([
             restEntry,
@@ -328,6 +361,7 @@ export default function App() {
           savedLabels.push('Descanso Consciente');
         }
 
+        // 4. Water
         if (parsed.waterMl && parsed.waterMl > 0) {
           updatedHabits.waterMl = Math.max(
             0,
@@ -337,16 +371,81 @@ export default function App() {
           savedLabels.push(`+${parsed.waterMl} ml água`);
         }
 
+        // 5. Lumbar Update
         if (parsed.lumbarUpdate) {
           nextPreWorkout = {
             ...nextPreWorkout,
             lumbarNow: parsed.lumbarUpdate.lumbarNow,
             rightLegRadiation: parsed.lumbarUpdate.rightLegRadiation,
             date: todayIso,
-            updatedAt: new Date().toISOString(),
+            updatedAt: nowIso,
           };
           savedLabels.push(`Lombar ${parsed.lumbarUpdate.lumbarNow}/10`);
         }
+
+        // 6. Medications & Supplements
+        if (parsed.medications && parsed.medications.length > 0) {
+          const newMeds: MedicationEntry[] = parsed.medications.map((m, idx) => ({
+            id: `med-${Date.now()}-${idx}`,
+            date: targetDate,
+            name: m.name,
+            timeApprox: m.timeApprox,
+            note: parsed.rawText,
+            createdAt: nowIso,
+          }));
+          nextMedLogs = sortByDateDesc([...newMeds, ...nextMedLogs]);
+          savedLabels.push(`Remédios (${newMeds.length})`);
+        }
+
+        // 7. Mood & Energy
+        if (parsed.mood) {
+          const moodEntry: MoodEntry = {
+            id: `mood-${Date.now()}`,
+            date: targetDate,
+            summary: parsed.mood.summary,
+            energy: parsed.mood.energy,
+            note: parsed.rawText,
+            createdAt: nowIso,
+          };
+          nextMoodLogs = sortByDateDesc([moodEntry, ...nextMoodLogs]);
+          nextPreWorkout = {
+            ...nextPreWorkout,
+            energy: parsed.mood.energy,
+            updatedAt: nowIso,
+          };
+          savedLabels.push('Como me senti');
+        }
+
+        // 8. Body Measurement (Weight / Waist — silently recalculates water & calories)
+        if (parsed.bodyMeasurement && (parsed.bodyMeasurement.weightKg || parsed.bodyMeasurement.waistCm)) {
+          const calc = calculateBodyMetrics(
+            parsed.bodyMeasurement.weightKg,
+            parsed.bodyMeasurement.waistCm,
+            prev.profileHeightCm || DEFAULT_HEIGHT_CM
+          );
+          const bodyEntry: BodyMeasurementEntry = {
+            id: `body-voice-${Date.now()}`,
+            date: targetDate,
+            weightKg: parsed.bodyMeasurement.weightKg,
+            waistCm: parsed.bodyMeasurement.waistCm,
+            bmi: calc.bmi,
+            waistToHeightRatio: calc.waistToHeightRatio,
+            note: parsed.rawText,
+            createdAt: nowIso,
+          };
+          nextBodyMeasurements = sortByDateDesc([bodyEntry, ...nextBodyMeasurements]);
+          savedLabels.push('Peso/Medidas');
+        }
+
+        // 9. ALWAYS preserve verbatim original transcript in Private Database
+        const voiceEntry: VoiceDiaryEntry = {
+          id: `voice-${Date.now()}`,
+          date: targetDate,
+          rawText: parsed.rawText,
+          detectedCategories: [...savedLabels],
+          createdAt: nowIso,
+        };
+        const nextVoiceLogs = sortByDateDesc([voiceEntry, ...prev.voiceDiaryLogs]);
 
         if (habitsChanged) {
           nextHabitsByDate = {
@@ -361,12 +460,18 @@ export default function App() {
           checkIns: nextCheckIns,
           dailyHabitsByDate: nextHabitsByDate,
           preWorkout: nextPreWorkout,
+          medicationLogs: nextMedLogs,
+          moodLogs: nextMoodLogs,
+          bodyMeasurements: nextBodyMeasurements,
+          voiceDiaryLogs: nextVoiceLogs,
         };
       });
 
-      if (savedLabels.length > 0) {
-        showToast(`Salvo (${parsed.dateLabel}): ${savedLabels.join(' · ')}`);
-      }
+      showToast(
+        savedLabels.length > 0
+          ? `Salvo no Banco de Dados (${parsed.dateLabel}): ${savedLabels.join(' · ')}`
+          : `Transcrição completa salva no Banco de Dados (${parsed.dateLabel})!`
+      );
     },
     [todayIso, showToast]
   );
@@ -423,7 +528,7 @@ export default function App() {
         <div
           role="status"
           aria-live="polite"
-          className="no-print fixed bottom-20 left-1/2 -translate-x-1/2 z-40 max-w-[92vw] sm:max-w-md rounded-2xl bg-[#06283D] text-white px-4 py-3 shadow-lg border border-[#00A896]/50 flex items-center gap-2 text-xs sm:text-sm font-semibold"
+          className="no-print fixed bottom-20 left-1/2 -translate-x-1/2 z-40 max-w-[92vw] sm:max-w-lg rounded-2xl bg-[#06283D] text-white px-4 py-3 shadow-lg border border-[#00A896]/50 flex items-center gap-2 text-xs sm:text-sm font-semibold"
         >
           <Check className="w-4 h-4 text-[#7FDAD0] shrink-0" aria-hidden="true" />
           <span>{toastMessage}</span>
@@ -439,9 +544,6 @@ export default function App() {
             onAdjustWater={(delta) => handleAdjustWater(delta, todayIso)}
             onMarkBreathingDone={handleMarkBreathingDone}
             onOpenVoiceModal={() => setVoiceModalOpen(true)}
-            onOpenWorkoutModal={() => setWorkoutModalOpen(true)}
-            onOpenSleepModal={() => setSleepModalOpen(true)}
-            onOpenRestModal={() => setRestModalOpen(true)}
           />
         )}
 
@@ -457,8 +559,12 @@ export default function App() {
           <CheckInTab
             todayIso={todayIso}
             preWorkout={state.preWorkout}
+            latestWeightKg={latestWeightKg}
+            initialManualMode={openCheckInManual}
+            onClearInitialManualMode={() => setOpenCheckInManual(false)}
             onSaveCheckIn={handleSaveCheckIn}
-            onOpenVoiceModal={() => setVoiceModalOpen(true)}
+            onConfirmVoiceAll={handleConfirmUniversalVoice}
+            onOpenSleepModal={() => setSleepModalOpen(true)}
             onOpenRestModal={() => setRestModalOpen(true)}
           />
         )}
@@ -476,6 +582,7 @@ export default function App() {
             state={state}
             onSaveCoachEval={handleSaveCoachEval}
             onImportState={handleImportState}
+            onOpenPrivateDatabase={() => setPrivateDbOpen(true)}
           />
         )}
       </main>
@@ -493,8 +600,13 @@ export default function App() {
         isOpen={voiceModalOpen}
         todayIso={todayIso}
         defaultLumbar={state.preWorkout.lumbarNow}
+        latestWeightKg={latestWeightKg}
         onClose={() => setVoiceModalOpen(false)}
         onConfirmAll={handleConfirmUniversalVoice}
+        onOpenManualEntry={() => {
+          setOpenCheckInManual(true);
+          setActiveTab('checkin');
+        }}
       />
 
       <SleepDrawerModal
@@ -511,12 +623,12 @@ export default function App() {
         onConfirmConsciousRest={handleConfirmConsciousRest}
       />
 
-      <QuickWorkoutModal
-        isOpen={workoutModalOpen}
-        todayIso={todayIso}
-        defaultLumbar={state.preWorkout.lumbarNow}
-        onClose={() => setWorkoutModalOpen(false)}
-        onSaveWorkout={handleSaveCheckIn}
+      <PrivateDatabaseModal
+        isOpen={privateDbOpen}
+        state={state}
+        onClose={() => setPrivateDbOpen(false)}
+        onAddMeasurement={handleAddMeasurement}
+        onImportState={handleImportState}
       />
     </div>
   );

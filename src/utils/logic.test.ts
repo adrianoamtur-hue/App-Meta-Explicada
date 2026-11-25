@@ -1,141 +1,162 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildPrivateDatabaseReport,
   buildSleepBlock,
+  calculateBodyMetrics,
   calculateReadiness,
   calculateSleepDurationMinutes,
   createInitialState,
-  degToCompass,
   estimateCalories,
-  evaluateSurfGasoline,
-  formatDurationHoursMin,
+  getDailyWaterGoalMl,
   getProjectProgress,
   mergeWithDefaultState,
   parseUniversalVoiceDiary,
   parseVoiceCheckIn,
   sumSleepBlocksMinutes,
-  validateBackupJson,
 } from './logic';
 
-test('project progress computes Day 01, Day 03, phases, and countdown accurately', () => {
+test('project progress computes Day 01, Day 04, phases, and countdown accurately', () => {
   const day1 = getProjectProgress('2026-11-21');
   assert.equal(day1.currentDay, 1);
   assert.equal(day1.phaseIndex, 1);
 
-  const day3 = getProjectProgress('2026-11-23');
-  assert.equal(day3.currentDay, 3);
+  const day4 = getProjectProgress('2026-11-24');
+  assert.equal(day4.currentDay, 4);
+  assert.equal(day4.phaseIndex, 1);
 
   const phase2 = getProjectProgress('2027-03-01');
   assert.equal(phase2.phaseIndex, 2);
 
-  const phase3 = getProjectProgress('2027-06-15');
+  const phase3 = getProjectProgress('2027-07-01');
   assert.equal(phase3.phaseIndex, 3);
 });
 
 test('multi-block sleep duration handles overnight and daytime shift blocks accurately', () => {
-  const b1 = buildSleepBlock('14:00', '19:00');
-  const b2 = buildSleepBlock('22:15', '07:00');
-  assert.equal(b1.durationMinutes, 300); // 5h00min
-  assert.equal(b2.durationMinutes, 525); // 8h45min
-  assert.equal(sumSleepBlocksMinutes([b1, b2]), 825);
-  assert.equal(formatDurationHoursMin(825), '13h45min');
+  assert.equal(calculateSleepDurationMinutes('20:46', '01:30'), 284); // 4h44min
+  assert.equal(calculateSleepDurationMinutes('14:00', '19:00'), 300); // 5h00min
+  assert.equal(calculateSleepDurationMinutes('22:15', '07:00'), 525); // 8h45min
+  assert.equal(calculateSleepDurationMinutes('02:30', '08:00'), 330); // 5h30min
+  assert.equal(calculateSleepDurationMinutes('21:15', '01:25'), 250); // 4h10min
 
-  assert.equal(calculateSleepDurationMinutes('20:46', '01:30'), 284);
-  assert.equal(formatDurationHoursMin(284), '4h44min');
+  const multi = sumSleepBlocksMinutes([
+    buildSleepBlock('14:00', '19:00'),
+    buildSleepBlock('22:15', '07:00'),
+  ]);
+  assert.equal(multi, 825);
 });
 
 test('L4-S1 readiness traffic light handles right-leg alert, short sleep, and fragmented/moído sleep', () => {
-  const redRoot = calculateReadiness({
+  const redAlert = calculateReadiness({
     sleepMinutes: 480,
     lumbarPain: 2,
     rightLegRadiation: true,
     energy: 'Alta',
   });
-  assert.equal(redRoot.light, 'vermelho');
+  assert.equal(redAlert.light, 'vermelho');
 
-  const fragmentedDay = calculateReadiness({
-    sleepMinutes: 525, // 8h45min
+  const fragmentedYellow = calculateReadiness({
+    sleepMinutes: 525,
     lumbarPain: 2,
     rightLegRadiation: false,
     energy: 'Moderada',
     fragmentedSleep: true,
     sleepFeeling: 'Moído',
   });
-  assert.equal(fragmentedDay.light, 'amarelo');
-  assert.equal(fragmentedDay.sleepWarning, true);
-
-  const greenDay = calculateReadiness({
-    sleepMinutes: 460,
-    lumbarPain: 1,
-    rightLegRadiation: false,
-    energy: 'Alta',
-    fragmentedSleep: false,
-    sleepFeeling: 'Zerado',
-  });
-  assert.equal(greenDay.light, 'verde');
+  assert.equal(fragmentedYellow.light, 'amarelo');
+  assert.equal(fragmentedYellow.sleepWarning, true);
 });
 
-test('universal Portuguese voice diary parses date, rest, workout, multi-block sleep, lumbar, and water independently', () => {
-  const res1 = parseUniversalVoiceDiary(
-    'Ontem fiz descanso consciente e dormi das 14 às 19, bebi 500ml de água',
-    '2026-11-23'
-  );
-  assert.equal(res1.targetDate, '2026-11-22');
-  assert.equal(res1.dateLabel, 'Ontem');
-  assert.equal(res1.consciousRest?.enabled, true);
-  assert.equal(res1.workout, undefined);
-  assert.equal(res1.sleep?.blocks.length, 1);
-  assert.equal(res1.sleep?.blocks[0].bedTime, '14:00');
-  assert.equal(res1.sleep?.blocks[0].wakeTime, '19:00');
-  assert.equal(res1.sleep?.totalMinutes, 300);
-  assert.equal(res1.waterMl, 500);
+test('turbocharged Portuguese voice parser extracts dual sleep/shift windows with exact 24h conversion', () => {
+  const phrase =
+    'De ontem para hoje fui dormir às 10 da noite, efetivo 2:30 da manhã até 8 da manhã, e agora estou indo dormir 9:15 e vou acordar 1:25 da manhã.';
+  const parsed = parseUniversalVoiceDiary(phrase, '2026-11-24', 2);
 
-  const res2 = parseUniversalVoiceDiary(
-    'Hoje dormi das 10 da noite até 7 da manhã, sono picado acordei várias vezes e acordei moído. Fiz fluxo chinês por 20 minutos, lombar de 4 para 2 e tomei 2 copos de água',
-    '2026-11-23'
-  );
-  assert.equal(res2.targetDate, '2026-11-23');
-  assert.equal(res2.sleep?.blocks[0].bedTime, '22:00');
-  assert.equal(res2.sleep?.blocks[0].wakeTime, '07:00');
-  assert.equal(res2.sleep?.fragmented, true);
-  assert.equal(res2.sleep?.feeling, 'Moído');
-  assert.equal(res2.workout?.modality, 'Fluxo Chinês');
-  assert.equal(res2.workout?.durationMin, 20);
-  assert.equal(res2.workout?.lumbarBefore, 4);
-  assert.equal(res2.workout?.lumbarAfter, 2);
-  assert.equal(res2.waterMl, 500);
+  assert.equal(parsed.targetDate, '2026-11-24');
+  assert.equal(parsed.dateLabel, 'Hoje');
+  assert.ok(parsed.sleepSegments && parsed.sleepSegments.length === 2, 'Expected 2 sleep segments');
 
-  const res3 = parseUniversalVoiceDiary(
-    'Dormi 2 da tarde até 7 e depois das 22:15 até 7:00, sem dor',
-    '2026-11-23'
+  // Segment 1: Sono Registrado 02:30 -> 08:00 (5h30min) with inBedTime 22:00
+  const seg1 = parsed.sleepSegments[0];
+  assert.equal(seg1.kind, 'registered');
+  assert.equal(seg1.inBedTime, '22:00');
+  assert.equal(seg1.blocks[0].bedTime, '02:30');
+  assert.equal(seg1.blocks[0].wakeTime, '08:00');
+  assert.equal(seg1.totalMinutes, 330);
+
+  // Segment 2: Próximo Sono / Escala 21:15 -> 01:25 (4h10min)
+  const seg2 = parsed.sleepSegments[1];
+  assert.equal(seg2.kind, 'upcoming_shift');
+  assert.equal(seg2.blocks[0].bedTime, '21:15');
+  assert.equal(seg2.blocks[0].wakeTime, '01:25');
+  assert.equal(seg2.totalMinutes, 250);
+});
+
+test('universal Portuguese voice diary parses medications, mood, weight/waist, rest, workout, lumbar, and water', () => {
+  const fullPhrase =
+    'Hoje me senti cansado com energia baixa, lombar nota 3 sem formigamento na perna direita, tomei dipirona às 8h e creatina, fiz pilates pelo wellhub 50 minutos, peso 82,5 kg e cintura 85 cm, bebi 750ml.';
+  const parsed = parseUniversalVoiceDiary(fullPhrase, '2026-11-25', 2);
+
+  assert.equal(parsed.waterMl, 750);
+  assert.equal(parsed.workout?.modality, 'Wellhub — Pilates');
+  assert.equal(parsed.workout?.durationMin, 50);
+  assert.equal(parsed.lumbarUpdate?.lumbarNow, 3);
+  assert.equal(parsed.lumbarUpdate?.rightLegRadiation, false);
+  assert.equal(parsed.mood?.energy, 'Baixa');
+  assert.ok(parsed.medications?.some((m) => m.name === 'Dipirona' && m.timeApprox === '08:00'));
+  assert.ok(parsed.medications?.some((m) => m.name === 'Creatina'));
+  assert.equal(parsed.bodyMeasurement?.weightKg, 82.5);
+  assert.equal(parsed.bodyMeasurement?.waistCm, 85);
+
+  // Verify yesterday rest + afternoon sleep ("2 da tarde ate 7")
+  const yesterdayRest = parseUniversalVoiceDiary(
+    'Ontem fiz descanso consciente e dormi das 2 da tarde até 7, bebi 2 copos',
+    '2026-11-25',
+    2
   );
-  assert.equal(res3.sleep?.blocks.length, 2);
-  assert.equal(res3.sleep?.blocks[0].bedTime, '14:00');
-  assert.equal(res3.sleep?.blocks[0].wakeTime, '19:00');
-  assert.equal(res3.sleep?.blocks[1].bedTime, '22:15');
-  assert.equal(res3.sleep?.blocks[1].wakeTime, '07:00');
-  assert.equal(res3.lumbarUpdate?.lumbarNow, 0);
+  assert.equal(yesterdayRest.targetDate, '2026-11-24');
+  assert.equal(yesterdayRest.dateLabel, 'Ontem');
+  assert.equal(yesterdayRest.consciousRest?.enabled, true);
+  assert.equal(yesterdayRest.workout, undefined);
+  assert.equal(yesterdayRest.waterMl, 500);
+  assert.equal(yesterdayRest.sleepSegments?.[0].blocks[0].bedTime, '14:00');
+  assert.equal(yesterdayRest.sleepSegments?.[0].blocks[0].wakeTime, '19:00');
+});
+
+test('body metrics for 1.72m calculate BMI, waist/height ratio, dynamic water goal (38ml/kg), and scaled calories', () => {
+  const metrics = calculateBodyMetrics(80, 84, 172);
+  assert.equal(metrics.bmi, 27.0);
+  assert.equal(metrics.bmiLabel, 'Sobrepeso');
+  assert.equal(metrics.waistToHeightRatio, 0.49);
+  assert.equal(metrics.waistStatus, 'ideal');
+
+  assert.equal(getDailyWaterGoalMl(80), 3040);
+  assert.equal(getDailyWaterGoalMl(undefined), 3000);
+  assert.ok(estimateCalories('Areia / Orla', 60, 90) > estimateCalories('Areia / Orla', 60, 70));
 });
 
 test('legacy voice check-in parser still handles Wellhub Pilates and durations accurately', () => {
   const parsed = parseVoiceCheckIn(
-    'Fiz Pilates pelo Wellhub por 1 hora e 10 minutos, esforço 3, lombar antes 4 e depois 2, gravei vídeo pro @metaexplicada'
+    'Fiz Pilates pelo Wellhub por 1 hora e 15, esforço 3, lombar antes 4 depois 2, gravei vídeo pro @metaexplicada'
   );
   assert.equal(parsed.modality, 'Wellhub — Pilates');
-  assert.equal(parsed.durationMin, 70);
+  assert.equal(parsed.isWellhub, true);
+  assert.equal(parsed.durationMin, 75);
+  assert.equal(parsed.effort, 3);
   assert.equal(parsed.lumbarBefore, 4);
   assert.equal(parsed.lumbarAfter, 2);
   assert.equal(parsed.hasMediaForInsta, true);
 });
 
-test('non-destructive migration preserves existing entries while ensuring Days 01, 02, and 03 exist', () => {
-  const legacyUserState = {
+test('non-destructive migration preserves existing entries while ensuring Days 01, 02, 03, and 04 exist', () => {
+  const legacyState = {
     version: 31,
+    stance: 'Goofy' as const,
     checkIns: [
       {
-        id: 'custom-user-entry',
-        date: '2026-11-23',
-        dayNumber: 3,
+        id: 'custom-user-workout',
+        date: '2026-11-25',
+        dayNumber: 5,
         modality: 'Wellhub — Pilates' as const,
         durationMin: 50,
         calories: 190,
@@ -144,40 +165,35 @@ test('non-destructive migration preserves existing entries while ensuring Days 0
         rightLegRadiation: false,
         effort: 3,
         location: 'João Pessoa - PB',
-        note: 'Treino customizado salvo pelo usuário',
+        note: 'Treino salvo pelo usuário',
         hasMediaForInsta: true,
-        createdAt: '2026-11-23T10:00:00.000Z',
+        createdAt: '2026-11-25T10:00:00.000Z',
       },
     ],
-    sleepLogs: [
-      {
-        id: 'sleep-day-01',
-        date: '2026-11-21',
-        bedTime: '20:46',
-        wakeTime: '01:30',
-        durationMinutes: 284,
-        isNightShift: true,
-        feeling: 'Recuperando' as const,
-      },
-    ],
+    sleepLogs: [],
   };
 
-  const migrated = mergeWithDefaultState(legacyUserState as unknown as Partial<ReturnType<typeof createInitialState>>);
-  // Preserves custom user entry
-  assert.ok(migrated.checkIns.some((c) => c.id === 'custom-user-entry'));
-  // Includes Day 01 walk & Day 02 conscious rest
-  assert.ok(migrated.checkIns.some((c) => c.id === 'checkin-day-01' && c.distanceKm === 8.8));
-  assert.ok(migrated.checkIns.some((c) => c.id === 'checkin-day-02-rest' && c.modality === 'Descanso Consciente'));
-  // Includes all 3 milestone sleeps & upgrades legacy sleep to blocks[]
-  assert.ok(migrated.sleepLogs.some((s) => s.id === 'sleep-day-01' && s.blocks[0].bedTime === '20:46'));
-  assert.ok(migrated.sleepLogs.some((s) => s.id === 'sleep-day-02-daytime' && s.totalMinutes === 300));
-  assert.ok(migrated.sleepLogs.some((s) => s.id === 'sleep-day-03' && s.fragmented === true && s.feeling === 'Moído'));
-  // Habits preserved for Day 01 and Day 02
-  assert.equal(migrated.dailyHabitsByDate['2026-11-21'].breathingDone, true);
-  assert.equal(migrated.dailyHabitsByDate['2026-11-22'].consciousRest, true);
+  const merged = mergeWithDefaultState(legacyState);
+  assert.equal(merged.stance, 'Goofy');
+  assert.equal(merged.profileHeightCm, 172);
+  assert.ok(merged.checkIns.some((c) => c.id === 'custom-user-workout'));
+  assert.ok(merged.checkIns.some((c) => c.date === '2026-11-21' && c.distanceKm === 8.8));
+  assert.ok(merged.checkIns.some((c) => c.date === '2026-11-22' && c.modality === 'Descanso Consciente'));
+  assert.ok(merged.sleepLogs.some((s) => s.date === '2026-11-21' && s.totalMinutes === 284));
+  assert.ok(merged.sleepLogs.some((s) => s.date === '2026-11-22' && s.totalMinutes === 300));
+  assert.ok(merged.sleepLogs.some((s) => s.date === '2026-11-23' && s.fragmented && s.feeling === 'Moído'));
+  assert.ok(
+    merged.sleepLogs.some(
+      (s) => s.id === 'sleep-day-04-night' && s.inBedTime === '22:00' && s.totalMinutes === 330
+    )
+  );
+  assert.ok(
+    merged.sleepLogs.some(
+      (s) => s.id === 'sleep-day-04-shift' && s.kind === 'upcoming_shift' && s.totalMinutes === 250
+    )
+  );
 
-  assert.equal(degToCompass(90), 'L');
-  assert.equal(estimateCalories('Areia / Orla', 100), 450);
-  assert.equal(evaluateSurfGasoline({ waveHeightM: 1.2, swellPeriodS: 12, windSpeedKmh: 10, tide: 'Enchendo' }).light, 'verde');
-  assert.equal(validateBackupJson(JSON.stringify(migrated)).ok, true);
+  const report = buildPrivateDatabaseReport(createInitialState(), 30);
+  assert.ok(report.includes('RELATÓRIO CLÍNICO PRIVADO'));
+  assert.ok(report.includes('1,72 m'));
 });

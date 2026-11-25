@@ -3,6 +3,7 @@ import {
   Camera,
   Check,
   Copy,
+  Database,
   Download,
   ExternalLink,
   Eye,
@@ -23,6 +24,7 @@ interface JourneyTabProps {
   state: AppState;
   onSaveCoachEval: (evalItem: CoachEvaluation) => void;
   onImportState: (nextState: AppState) => void;
+  onOpenPrivateDatabase: () => void;
 }
 
 const COACH_CRITERIA: {
@@ -61,6 +63,7 @@ export const JourneyTab: React.FC<JourneyTabProps> = ({
   state,
   onSaveCoachEval,
   onImportState,
+  onOpenPrivateDatabase,
 }) => {
   const [selectedEntryId, setSelectedEntryId] = useState<string>(
     state.checkIns[0]?.id || ''
@@ -711,6 +714,18 @@ export const JourneyTab: React.FC<JourneyTabProps> = ({
           </p>
         )}
       </section>
+
+      {/* Subtle Hidden Private Database Access in Footer */}
+      <div className="pt-2 pb-4 flex justify-center">
+        <button
+          type="button"
+          onClick={onOpenPrivateDatabase}
+          className="min-h-[42px] px-4 rounded-xl bg-transparent hover:bg-white border border-transparent hover:border-[#E5E0D5] text-xs font-semibold text-[#5B7689] hover:text-[#06283D] inline-flex items-center gap-2 transition-colors cursor-pointer"
+        >
+          <Database className="w-3.5 h-3.5" aria-hidden="true" />
+          <span>Banco de Dados (Privado)</span>
+        </button>
+      </div>
     </div>
   );
 };

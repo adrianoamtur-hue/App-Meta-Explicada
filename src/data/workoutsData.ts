@@ -1,3 +1,8 @@
+export interface VideoLink {
+  label: string;
+  url: string;
+}
+
 export interface ExerciseItem {
   id: string;
   name: string;
@@ -5,17 +10,21 @@ export interface ExerciseItem {
   setsCount: number;
   surfPurpose: string;
   l4s1Shield: string;
-  youtubeUrl?: string;
-  youtubeLabel?: string;
+  videos: VideoLink[];
 }
+
+export type ChineseFlowStatus = 'liberado' | 'adaptado' | 'substituido';
 
 export interface ChineseFlowStep {
   index: number;
   id: string;
   name: string;
-  adaptedTag?: string;
+  status: ChineseFlowStatus;
+  statusLabel: string;
+  surfBridge: string;
   instruction: string;
-  l4s1Shield: string;
+  videoUrl?: string;
+  videoLabel?: string;
 }
 
 export interface ManeuverCard {
@@ -25,7 +34,7 @@ export interface ManeuverCard {
   subtitle: string;
   mainVideoUrl: string;
   mainVideoLabel: string;
-  extraVideos: { label: string; url: string }[];
+  extraVideos: VideoLink[];
   watchFor: string;
   drylandDrill: string;
   l4s1Shield: string;
@@ -36,7 +45,7 @@ export interface EliteLesson {
   title: string;
   duration: string;
   coach: string;
-  videos: { label: string; url: string }[];
+  videos: VideoLink[];
   focus: string;
   adaptations: string[];
 }
@@ -51,8 +60,9 @@ export const ACADEMIA_A_EXERCISES: ExerciseItem[] = [
       'Força unilateral de perna dianteira e traseira para comprimir na cavada (Bottom Turn) e sustentar a borda em ondas longas das Maldivas.',
     l4s1Shield:
       'Mantém metade da carga na coluna comparado ao agachamento livre com barra. Use halteres nas mãos, tronco levemente inclinado em bloco (coluna neutra) sem arredondar lombar.',
-    youtubeUrl: 'https://www.youtube.com/watch?v=v-bItsW7fUI',
-    youtubeLabel: 'Ver execução no YouTube',
+    videos: [
+      { label: 'Ver Búlgaro Seguro', url: 'https://www.youtube.com/watch?v=v-bItsW7fUI' },
+    ],
   },
   {
     id: 'acad-a-pelvica',
@@ -63,8 +73,9 @@ export const ACADEMIA_A_EXERCISES: ExerciseItem[] = [
       'Ativa glúteo máximo para impulsionar o quadril nas rasgadas e proteger a base durante 3 horas de surf no recife.',
     l4s1Shield:
       'Olhar sempre à frente (queixo levemente recolhido) e costelas travadas. NUNCA hiperestender a lombar no topo (retrolistese de L5 exige subir só até alinhar tronco e coxas).',
-    youtubeUrl: 'https://www.youtube.com/watch?v=TJgWb0_4Uxc',
-    youtubeLabel: 'Ver execução no YouTube',
+    videos: [
+      { label: 'Ver Elevação Pélvica', url: 'https://www.youtube.com/watch?v=TJgWb0_4Uxc' },
+    ],
   },
   {
     id: 'acad-a-pallof',
@@ -75,8 +86,9 @@ export const ACADEMIA_A_EXERCISES: ExerciseItem[] = [
       'Blindagem anti-rotação do core: transfere força das pernas para a prancha sem desperdiçar energia torcendo a cintura.',
     l4s1Shield:
       'Exercício padrão-ouro para fissura radial em L5-S1 e contato na raiz direita L5. Empurre o cabo à frente mantendo pelve e costelas imóveis, respirando pelo diafragma.',
-    youtubeUrl: 'https://www.youtube.com/watch?v=LuePuoHEt6s',
-    youtubeLabel: 'Ver execução no YouTube',
+    videos: [
+      { label: 'Ver Pallof Press', url: 'https://www.youtube.com/watch?v=LuePuoHEt6s' },
+    ],
   },
   {
     id: 'acad-a-extensora-flexora',
@@ -87,6 +99,10 @@ export const ACADEMIA_A_EXERCISES: ExerciseItem[] = [
       'Isolamento seguro de quadríceps e posteriores de coxa para absorver chop e manter resistência muscular sem cansar as costas.',
     l4s1Shield:
       'Zero compressão axial nos discos L4-L5/L5-S1. Na mesa flexora, contraia abdômen e mantenha o quadril colado no estofado durante toda a subida.',
+    videos: [
+      { label: 'Ver Extensora', url: 'https://www.youtube.com/watch?v=tcdgal1epsI' },
+      { label: 'Ver Mesa Flexora sem Dor Lombar', url: 'https://www.youtube.com/watch?v=VWRKAkhRir4' },
+    ],
   },
 ];
 
@@ -100,6 +116,9 @@ export const ACADEMIA_B_EXERCISES: ExerciseItem[] = [
       'Potência e resistência de remada para entrar cedo nas ondas de Sultans e Pasta Point sem travar ombros.',
     l4s1Shield:
       'Apoio firme de mão e joelho no banco retira a sobrecarga de L5-S1. Puxe o cotovelo na direção do quadril com coluna perfeitamente neutra.',
+    videos: [
+      { label: 'Ver Remada Serrote', url: 'https://www.youtube.com/watch?v=mjFIZX68F_8' },
+    ],
   },
   {
     id: 'acad-b-puxada',
@@ -110,26 +129,35 @@ export const ACADEMIA_B_EXERCISES: ExerciseItem[] = [
       'Fortalece grande dorsal e estabilizadores escapulares responsáveis pelo deslize eficiente da remada.',
     l4s1Shield:
       'Trave levemente o abdômen e NÃO jogue o tronco para trás arqueando a lombar (protege a retrolistese de L5). Puxe a barra até a clavícula com controle.',
+    videos: [
+      { label: 'Ver Puxada Alta na Polia', url: 'https://www.youtube.com/watch?v=3qj46qsOgfI' },
+    ],
   },
   {
     id: 'acad-b-flexao',
-    name: 'Flexão de Braço Inclinada (controle escapular)',
+    name: 'Flexão Inclinada Escapular',
     prescription: '3×10–12',
     setsCount: 3,
     surfPurpose:
       'Simula o empurrão do pop-up com ativação de serrátil anterior e estabilidade de ombro.',
     l4s1Shield:
       'A inclinação (mãos no banco ou barra fixa) impede a lombar de "ceder" em hiperextensão. Mantenha glúteos contraídos em prancha rígida.',
+    videos: [
+      { label: 'Ver Flexão Inclinada', url: 'https://www.youtube.com/watch?v=TfzlcE4293c' },
+    ],
   },
   {
     id: 'acad-b-woodchopper',
-    name: 'Rotação de Tronco na Polia (Woodchopper horizontal leve)',
+    name: 'Woodchopper / Rotação na Polia',
     prescription: '3×10 cada lado',
     setsCount: 3,
     surfPurpose:
       'Desenvolve potência rotacional funcional para guiar o cutback e a rasgada conectando tronco, quadril e pés.',
     l4s1Shield:
       'OBRIGATÓRIO pivotar o pé de trás junto com o giro do quadril. A rotação nasce na coluna torácica e quadril — nunca torça a lombar com os pés presos no chão.',
+    videos: [
+      { label: 'Ver Woodchopper na Polia', url: 'https://www.youtube.com/watch?v=90Qh5XG6mqs' },
+    ],
   },
 ];
 
@@ -143,6 +171,9 @@ export const AREIA_EXERCISES: ExerciseItem[] = [
       'Aquece circulação, lubrifica quadris e cria tração suave para abrir espaço entre vértebras após horas sentado ou de escala.',
     l4s1Shield:
       'Mantenha a ponta dos pés tocando o chão na barra para dosar a tração sem espasmo reflexo em L5-S1. Caminhe apenas no calçadão ou areia batida 100% plana.',
+    videos: [
+      { label: 'Ver Dead Hang Descompressão', url: 'https://www.youtube.com/watch?v=VCeKKtGGxJY' },
+    ],
   },
   {
     id: 'areia-tornozelo',
@@ -153,6 +184,9 @@ export const AREIA_EXERCISES: ExerciseItem[] = [
       'Dorsiflexão livre permite abaixar o centro de gravidade na prancha sem dobrar a coluna para frente.',
     l4s1Shield:
       'Quanto melhor o tornozelo avança sobre a ponta do pé, menos compensação de flexão lombar acontece no Bottom Turn.',
+    videos: [
+      { label: 'Ver Execução', url: 'https://www.youtube.com/watch?v=sj4x3u3UmZk' },
+    ],
   },
   {
     id: 'areia-toracica',
@@ -163,8 +197,9 @@ export const AREIA_EXERCISES: ExerciseItem[] = [
       'Libera o giro do peito e ombros necessário para olhar o lip na cavada e completar o cutback.',
     l4s1Shield:
       'Quadril sentado levemente para trás nos calcanhares trava a lombar em segurança e isola 100% do giro na coluna torácica.',
-    youtubeUrl: 'https://www.youtube.com/watch?v=PLDCRU55LSU',
-    youtubeLabel: 'Ver Rotação Torácica no YouTube',
+    videos: [
+      { label: 'Ver Rotação Torácica', url: 'https://www.youtube.com/watch?v=PLDCRU55LSU' },
+    ],
   },
   {
     id: 'areia-prancha-ponte',
@@ -175,6 +210,10 @@ export const AREIA_EXERCISES: ExerciseItem[] = [
       'Estabilidade lateral do quadrado lombar e glúteo médio para segurar a prancha firme na borda.',
     l4s1Shield:
       'Dupla clássica de Stuart McGill para proteger fissuras discais. Na ponte, suba contraindo glúteos sem forçar arco lombar excessivo.',
+    videos: [
+      { label: 'Ver Prancha Lateral Adaptada', url: 'https://www.youtube.com/watch?v=8imTmxwFgRg' },
+      { label: 'Ver Ponte de Glúteo Segura', url: 'https://www.youtube.com/watch?v=ZBPwWREa8Xw' },
+    ],
   },
   {
     id: 'areia-afundo-gorila-popup',
@@ -185,8 +224,11 @@ export const AREIA_EXERCISES: ExerciseItem[] = [
       'Propriocepção dos dedos e calcanhares na areia para sentir a troca de borda e automatizar o pop-up limpo.',
     l4s1Shield:
       'Pop-up sempre em câmera lenta, sem salto seco e sem chicote lombar (protege o Modic Tipo 1 de impacto reativo).',
-    youtubeUrl: 'https://www.youtube.com/watch?v=_h7rHWH2f70',
-    youtubeLabel: 'Ver Posição do Gorila / Troca de Borda',
+    videos: [
+      { label: 'Ver Afundo Estático', url: 'https://www.youtube.com/watch?v=nUlG__NTuxQ' },
+      { label: 'Ver Posição do Gorila / Troca de Borda', url: 'https://www.youtube.com/watch?v=_h7rHWH2f70' },
+      { label: 'Ver Pop-up Lento', url: 'https://www.youtube.com/watch?v=KCLWvAcPcPk' },
+    ],
   },
 ];
 
@@ -195,124 +237,195 @@ export const CHINESE_FLOW_STEPS: ChineseFlowStep[] = [
     index: 1,
     id: 'cf-1',
     name: 'Lymphatic Hops',
-    adaptedTag: 'Adaptado Modic 1',
-    instruction: 'Sem salto seco: molejo elástico suave nos joelhos mantendo a ponta dos pés sempre em contato com o chão.',
-    l4s1Shield: 'Zero impacto vertical nas placas vertebrais inflamadas (Modic 1).',
+    status: 'adaptado',
+    statusLabel: 'ADAPTADO L4-S1',
+    surfBridge:
+      'Ativa circulação/linfa e acorda tornozelos para leitura de borda sem comprimir o Modic 1.',
+    instruction:
+      'Sem salto nem impacto: faça molejo elástico suave nos joelhos mantendo a ponta dos pés sempre em contato com o chão.',
+    videoUrl: 'https://www.youtube.com/watch?v=BGtvlIakEyI',
+    videoLabel: 'Ver Adaptação Segura',
   },
   {
     index: 2,
     id: 'cf-2',
     name: 'Body Waves',
-    adaptedTag: 'Adaptado Gorila',
-    instruction: 'Dobradiça de quadril com coluna reta estilo Gorila, flexionando joelhos suavemente sem arredondar a lombar.',
-    l4s1Shield: 'Evita flexão lombar repetida sobre a extrusão central de L5-S1.',
+    status: 'adaptado',
+    statusLabel: 'ADAPTADO L4-S1',
+    surfBridge:
+      'Ensina compressão e extensão do pumping (acelerada na parede) sem dobrar a lombar.',
+    instruction:
+      'Execute como dobradiça de quadril (Hip Hinge) com coluna reta estilo Gorila e joelhos macios, sem arredondar a lombar.',
+    videoUrl: 'https://www.youtube.com/watch?v=qzy9tDkswEA',
+    videoLabel: 'Ver Hip Hinge Seguro',
   },
   {
     index: 3,
     id: 'cf-3',
     name: 'Arm Swings',
-    instruction: 'Balanço rítmico e solto dos braços frente-trás com abdômen firme para estabilizar o centro.',
-    l4s1Shield: 'Bracing abdominal suave impede hiperextensão da retrolistese de L5.',
+    status: 'liberado',
+    statusLabel: 'LIBERADO',
+    surfBridge:
+      'Solta ombros e escápulas para uma remada mais longa, solta e econômica no outside.',
+    instruction:
+      'Balanço rítmico e solto dos braços frente-trás com abdômen firme para estabilizar o centro e evitar hiperextensão.',
   },
   {
     index: 4,
     id: 'cf-4',
     name: 'Trunk Twists',
-    adaptedTag: 'Pivot obrigatório',
-    instruction: 'Gire o tronco deixando os braços baterem soltos no corpo, sempre pivotando o calcanhar de trás junto.',
-    l4s1Shield: 'Nunca girar com os pés colados no chão; libera quadril e protege o ânulo fibroso.',
+    status: 'adaptado',
+    statusLabel: 'ADAPTADO L4-S1',
+    surfBridge:
+      'Lubrifica a coluna torácica para girar o corpo em bloco nas curvas (cavada e cutback).',
+    instruction:
+      'Sempre pivote o calcanhar de trás a cada giro — nunca torça a lombar com os pés travados no chão.',
+    videoUrl: 'https://www.youtube.com/watch?v=w3OrX5rDWh8',
+    videoLabel: 'Ver Giro c/ Pivot',
   },
   {
     index: 5,
     id: 'cf-5',
     name: 'Forward Arm Circles',
-    instruction: 'Círculos amplos de braços para frente, ombros baixos longe das orelhas e tronco estável.',
-    l4s1Shield: 'Lubrifica ombros para remada mantendo costelas alinhadas sobre a pelve.',
+    status: 'liberado',
+    statusLabel: 'LIBERADO',
+    surfBridge:
+      'Lubrifica a articulação dos ombros no sentido exato da braçada da remada.',
+    instruction:
+      'Círculos amplos de braços para frente, ombros baixos longe das orelhas e costelas alinhadas sobre a pelve.',
   },
   {
     index: 6,
     id: 'cf-6',
-    name: 'Squats',
-    adaptedTag: 'Até ~90°',
-    instruction: 'Agachamento fluido até cerca de 90 graus, parando antes de qualquer retroversão pélvica (butt wink).',
-    l4s1Shield: 'Mantém coluna neutra sem esmagar a parte anterior do disco L5-S1.',
+    name: 'Squats 90°',
+    status: 'liberado',
+    statusLabel: 'LIBERADO',
+    surfBridge:
+      'Força e resistência de coxas para segurar a base baixa em ondas longas das Maldivas.',
+    instruction:
+      'Agachamento fluido até cerca de 90 graus, parando antes de qualquer retroversão pélvica (coluna neutra).',
   },
   {
     index: 7,
     id: 'cf-7',
     name: 'Backward Arm Circles',
-    instruction: 'Círculos amplos para trás abrindo peito e ativando escápulas, respiração nasal fluida.',
-    l4s1Shield: 'Combate postura fechada sem projetar a barriga/lombar para frente.',
+    status: 'liberado',
+    statusLabel: 'LIBERADO',
+    surfBridge:
+      'Abre o peito e ativa escápulas contra a postura fechada causada por horas de remada.',
+    instruction:
+      'Círculos amplos para trás com respiração nasal fluida, sem projetar a barriga nem arquear a lombar.',
   },
   {
     index: 8,
     id: 'cf-8',
     name: 'Dead Arms',
-    adaptedTag: 'Pivot obrigatório',
-    instruction: 'Braços pesados acompanhando a rotação com joelhos leves e calcanhar de trás pivotando a cada lado.',
-    l4s1Shield: 'Descompressão suave de ombros e torácica sem cisalhamento lombar.',
+    status: 'adaptado',
+    statusLabel: 'ADAPTADO L4-S1',
+    surfBridge:
+      'Solta tensão acumulada de ombros e pescoço pós-remada mantendo o eixo do tronco leve.',
+    instruction:
+      'Deixe os braços pesados acompanharem a rotação suave, sempre pivotando o calcanhar oposto a cada giro.',
+    videoUrl: 'https://www.youtube.com/watch?v=w3OrX5rDWh8',
+    videoLabel: 'Ver Giro c/ Pivot',
   },
   {
     index: 9,
     id: 'cf-9',
     name: 'Golf Swings',
-    instruction: 'Movimento diagonal de coil/uncoil com coluna reta, liberando o pé de trás no final do giro.',
-    l4s1Shield: 'Treina o giro do surf protegendo L4-L5 de torção travada.',
+    status: 'adaptado',
+    statusLabel: 'ADAPTADO L4-S1',
+    surfBridge:
+      'Simula exatamente a abertura de peito e olhar subindo da cavada (Bottom Turn) em direção ao lip.',
+    instruction:
+      'Libere o pé de trás no giro e leve o olhar junto com as mãos, mantendo a coluna longa e sem torção travada.',
+    videoUrl: 'https://www.youtube.com/watch?v=w3OrX5rDWh8',
+    videoLabel: 'Ver Rotação Segura',
   },
   {
     index: 10,
     id: 'cf-10',
     name: 'Marches',
-    adaptedTag: 'Tronco ereto',
-    instruction: 'Elevação alternada de joelhos mantendo tronco 100% ereto, sem curvar as costas para alcançar o joelho.',
-    l4s1Shield: 'Ativa psoas e estabilidade pélvica sem provocar flexão lombar.',
+    status: 'liberado',
+    statusLabel: 'LIBERADO',
+    surfBridge:
+      'Trabalha equilíbrio unipodal e glúteo médio para manter estabilidade firme em cima da prancha.',
+    instruction:
+      'Eleve um joelho por vez mantendo o tronco 100% ereto, sem curvar as costas para encontrar o joelho.',
   },
   {
     index: 11,
     id: 'cf-11',
     name: 'Tiptoe Arm Swings',
-    instruction: 'Cresça nas pontas dos pés inspirando (descompressão no topo) e desça freando o calcanhar bem devagar.',
-    l4s1Shield: 'Descida controlada elimina choque seco no calcanhar/Modic 1.',
+    status: 'adaptado',
+    statusLabel: 'ADAPTADO L4-S1',
+    surfBridge:
+      'Fortalece tornozelos e amortecimento de aterrissagem nas seções da onda sem choque seco.',
+    instruction:
+      'Suba na ponta dos pés descomprimindo a coluna e desça freando o calcanhar bem devagar, sem mergulhar a lombar.',
+    videoUrl: 'https://www.youtube.com/watch?v=l3c8CYnksNI',
+    videoLabel: 'Ver Adaptação Segura',
   },
   {
     index: 12,
     id: 'cf-12',
-    name: 'Arco e Flecha Torácico em Pé',
-    adaptedTag: 'SUBSTITUÍDO (Windmills PROIBIDO)',
-    instruction: 'Em base de surf com coluna reta, estenda o braço da frente e puxe o cotovelo de trás abrindo o peito, acompanhando com o olhar.',
-    l4s1Shield: 'Substituição obrigatória: Windmills combinam flexão + rotação lombar (risco máximo para extrusão L5-S1).',
+    name: 'Arco e Flecha Torácico em Pé (ex-Windmills)',
+    status: 'substituido',
+    statusLabel: 'SUBSTITUÍDO (EX #12)',
+    surfBridge:
+      'Gera rotação torácica limpa para cavada, rasgada e cutback sem torcer L5-S1.',
+    instruction:
+      'Windmills PROIBIDO! Em base de surf com coluna reta, estenda o braço da frente e puxe o cotovelo de trás abrindo o peito, acompanhando com o olhar.',
+    videoUrl: 'https://www.youtube.com/watch?v=GFFcVqgCtD0',
+    videoLabel: 'Ver Arco e Flecha Torácico',
   },
   {
     index: 13,
     id: 'cf-13',
     name: 'Ballet Squats',
-    instruction: 'Pés afastados e pontas levemente para fora; desça com tronco vertical abrindo os quadris.',
-    l4s1Shield: 'Excelente abertura de adutores e quadril mantendo eixo vertebral neutro.',
+    status: 'liberado',
+    statusLabel: 'LIBERADO',
+    surfBridge:
+      'Abre mobilidade de quadril e virilha com tronco vertical para agachar compacto na cavada e no tubo.',
+    instruction:
+      'Pés afastados com pontas levemente para fora; desça mantendo tronco vertical e coluna perfeitamente neutra.',
   },
   {
     index: 14,
     id: 'cf-14',
     name: 'Wide Arm Step Backs',
-    instruction: 'Passo controlado para trás abrindo os braços em cruz, glúteo da perna de trás contraído e costelas travadas.',
-    l4s1Shield: 'Impede hiperextensão lombar (retrolistese L5) enquanto alonga flexores de quadril.',
+    status: 'adaptado',
+    statusLabel: 'ADAPTADO L4-S1',
+    surfBridge:
+      'Alonga peitoral e psoas encurtados por escalas e remada sem sobrecarregar a lombar.',
+    instruction:
+      'Dê passo curto para trás travando costelas e contraindo o glúteo da perna de trás para evitar hiperextensão de L5.',
   },
   {
     index: 15,
     id: 'cf-15',
     name: 'Horse Stance',
-    instruction: 'Base larga isométrica com coluna neutra, joelhos para fora e glúteos ativos — pura resistência para ondas longas das Maldivas.',
-    l4s1Shield: 'Fortalece pernas sem carga axial na coluna.',
+    status: 'liberado',
+    statusLabel: 'LIBERADO',
+    surfBridge:
+      'Resistência isométrica de coxas e glúteos com impacto zero para segurar paredes de 150 m nas Maldivas.',
+    instruction:
+      'Base larga isométrica com coluna neutra, joelhos apontando para fora e respiração controlada.',
   },
   {
     index: 16,
     id: 'cf-16',
     name: 'Body Taps',
-    instruction: 'Batidinhas leves para acordar circulação por braços, tronco e pernas; ao descer para as pernas, flexione joelhos com coluna reta.',
-    l4s1Shield: 'Encerra a sessão ativando sistema parassimpático sem flexionar a lombar.',
+    status: 'adaptado',
+    statusLabel: 'ADAPTADO L4-S1',
+    surfBridge:
+      'Acorda propriocepção corporal e sistema parassimpático antes do dia ou da queda no mar.',
+    instruction:
+      'Tapinhas leves em pé no tronco e quadril; se descer às pernas, agache flexionando os joelhos com coluna reta sem esticar o nervo ciático.',
   },
 ];
 
-export const CHINESE_FLOW_VIDEOS = [
+export const CHINESE_FLOW_VIDEOS: (VideoLink & { note?: string })[] = [
   {
     label: '15 min Completo (Jules Horn)',
     note: 'Aplique as adaptações L4-S1 da lista acima',
@@ -341,20 +454,24 @@ export const HOTEL_EXERCISES: ExerciseItem[] = [
     name: 'Aquecimento Pré-Surf (Mobilidade Geral)',
     prescription: '5 min contínuos',
     setsCount: 1,
-    surfPurpose: 'Eleva temperatura articular de quadris, ombros e tornozelos mesmo dentro do quarto de hotel.',
+    surfPurpose:
+      'Eleva temperatura articular de quadris, ombros e tornozelos mesmo dentro do quarto de hotel.',
     l4s1Shield: 'Pule qualquer toque no pé com pernas esticadas; mantenha joelhos macios.',
-    youtubeUrl: 'https://www.youtube.com/watch?v=eEKN2xlUUZc',
-    youtubeLabel: 'Ver Aquecimento Pré-Surf',
+    videos: [
+      { label: 'Ver Aquecimento Pré-Surf', url: 'https://www.youtube.com/watch?v=eEKN2xlUUZc' },
+    ],
   },
   {
     id: 'hotel-9090',
     name: 'Quadril 90/90',
     prescription: '2×10 trocas cada lado',
     setsCount: 2,
-    surfPurpose: 'Rotação interna e externa de quadril: segredo para encolher o joelho de trás no cutback e agachar baixo na cavada.',
+    surfPurpose:
+      'Rotação interna e externa de quadril: segredo para encolher o joelho de trás no cutback e agachar baixo na cavada.',
     l4s1Shield: 'Use as mãos apoiadas atrás para manter a coluna longa e sem compensar na lombar.',
-    youtubeUrl: 'https://www.youtube.com/watch?v=xJMpEiZ5q6c',
-    youtubeLabel: 'Ver Quadril 90/90',
+    videos: [
+      { label: 'Ver Quadril 90/90', url: 'https://www.youtube.com/watch?v=xJMpEiZ5q6c' },
+    ],
   },
   {
     id: 'hotel-deadbug',
@@ -362,9 +479,11 @@ export const HOTEL_EXERCISES: ExerciseItem[] = [
     prescription: '2×10 lentas',
     setsCount: 2,
     surfPurpose: 'Coordena movimento independente de braços e pernas mantendo o core blindado.',
-    l4s1Shield: 'Lombar suavemente apoiada no chão o tempo todo; se começar a arquear, reduza a amplitude da perna.',
-    youtubeUrl: 'https://www.youtube.com/watch?v=rasFXFLywxM',
-    youtubeLabel: 'Ver Dead Bug',
+    l4s1Shield:
+      'Lombar suavemente apoiada no chão o tempo todo; se começar a arquear, reduza a amplitude da perna.',
+    videos: [
+      { label: 'Ver Dead Bug', url: 'https://www.youtube.com/watch?v=rasFXFLywxM' },
+    ],
   },
   {
     id: 'hotel-birddog',
@@ -372,9 +491,11 @@ export const HOTEL_EXERCISES: ExerciseItem[] = [
     prescription: '2×8 cada lado (3s isometria)',
     setsCount: 2,
     surfPurpose: 'Estabilidade cruzada (cadeia posterior) essencial para equilíbrio dinâmico em cima da prancha.',
-    l4s1Shield: 'Pense em "crescer" para longe em linha reta — NÃO suba a perna acima da altura do quadril (retrolistese L5).',
-    youtubeUrl: 'https://www.youtube.com/watch?v=AYRMIKnbc8A',
-    youtubeLabel: 'Ver Bird-Dog',
+    l4s1Shield:
+      'Pense em "crescer" para longe em linha reta — NÃO suba a perna acima da altura do quadril (retrolistese L5).',
+    videos: [
+      { label: 'Ver Bird-Dog', url: 'https://www.youtube.com/watch?v=AYRMIKnbc8A' },
+    ],
   },
   {
     id: 'hotel-pallof',
@@ -383,16 +504,24 @@ export const HOTEL_EXERCISES: ExerciseItem[] = [
     setsCount: 2,
     surfPurpose: 'Anti-rotação portátil com elástico preso na maçaneta da porta.',
     l4s1Shield: 'Sem rotação lombar; resista à tração lateral com respiração controlada.',
-    youtubeUrl: 'https://www.youtube.com/watch?v=GC0NIcCGRvw',
-    youtubeLabel: 'Ver Pallof com Elástico',
+    videos: [
+      { label: 'Ver Pallof com Elástico', url: 'https://www.youtube.com/watch?v=GC0NIcCGRvw' },
+    ],
   },
   {
     id: 'hotel-combo',
     name: 'Afundo Estático + Remada Sentada c/ Elástico + Gorila/Borda',
     prescription: 'Afundo 2×10/lado · Remada 2×15 · Gorila 5 min',
     setsCount: 3,
-    surfPurpose: 'Fecha a sessão com pernas, puxada de remada e memória motora de troca de borda.',
-    l4s1Shield: 'Na remada sentada com elástico nos pés, mantenha joelhos levemente flexionados para não tensionar a raiz direita de L5.',
+    surfPurpose:
+      'Fecha a sessão com pernas, puxada de remada e memória motora de troca de borda.',
+    l4s1Shield:
+      'Na remada sentada com elástico nos pés, mantenha joelhos levemente flexionados para não tensionar a raiz direita de L5.',
+    videos: [
+      { label: 'Ver Afundo Estático', url: 'https://www.youtube.com/watch?v=nUlG__NTuxQ' },
+      { label: 'Ver Remada Sentada com Elástico', url: 'https://www.youtube.com/watch?v=ZQ8lub8ck7E' },
+      { label: 'Ver Gorila / Borda', url: 'https://www.youtube.com/watch?v=_h7rHWH2f70' },
+    ],
   },
 ];
 

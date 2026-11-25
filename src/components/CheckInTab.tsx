@@ -1,27 +1,32 @@
 import React, { useEffect, useState } from 'react';
 import {
+  ArrowLeft,
   Camera,
   Check,
   Loader2,
   MapPin,
-  Mic,
+  Moon,
   Save,
   ShieldCheck,
 } from 'lucide-react';
-import type { CheckInEntry, Modality, PreWorkoutState } from '../types';
+import type { CheckInEntry, Modality, PreWorkoutState, UniversalVoiceParsed } from '../types';
 import {
   estimateCalories,
   formatPtDate,
   getProjectProgress,
-  parseVoiceCheckIn,
   shiftIsoDate,
 } from '../utils/logic';
+import { VoiceDiaryPanel } from './VoiceDiaryPanel';
 
 interface CheckInTabProps {
   todayIso: string;
   preWorkout: PreWorkoutState;
+  latestWeightKg?: number;
+  initialManualMode?: boolean;
+  onClearInitialManualMode?: () => void;
   onSaveCheckIn: (entry: CheckInEntry) => void;
-  onOpenVoiceModal: () => void;
+  onConfirmVoiceAll: (payload: UniversalVoiceParsed) => void;
+  onOpenSleepModal: () => void;
   onOpenRestModal: () => void;
 }
 
@@ -41,12 +46,25 @@ const MOVEMENT_MODALITIES: { id: Modality; label: string; highlight?: boolean }[
 export const CheckInTab: React.FC<CheckInTabProps> = ({
   todayIso,
   preWorkout,
+  latestWeightKg,
+  initialManualMode = false,
+  onClearInitialManualMode,
   onSaveCheckIn,
-  onOpenVoiceModal,
+  onConfirmVoiceAll,
+  onOpenSleepModal,
   onOpenRestModal,
 }) => {
   const yesterdayIso = shiftIsoDate(todayIso, -1);
+  const [manualMode, setManualMode] = useState(initialManualMode);
 
+  useEffect(() => {
+    if (initialManualMode) {
+      setManualMode(true);
+      onClearInitialManualMode?.();
+    }
+  }, [initialManualMode, onClearInitialManualMode]);
+
+  // Manual Movement Form State
   const [date, setDate] = useState(todayIso);
   const [modality, setModality] = useState<Modality>('Wellhub — Pilates');
   const [isWellhub, setIsWellhub] = useState(true);
@@ -55,20 +73,17 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
   const [rightLegRadiation, setRightLegRadiation] = useState(preWorkout.rightLegRadiation);
   const [effort, setEffort] = useState(3);
   const [durationMin, setDurationMin] = useState(50);
-  const [calories, setCalories] = useState(() => estimateCalories('Wellhub — Pilates', 50));
+  const [calories, setCalories] = useState(() =>
+    estimateCalories('Wellhub — Pilates', 50, latestWeightKg)
+  );
   const [caloriesManual, setCaloriesManual] = useState(false);
   const [distanceKm, setDistanceKm] = useState('');
   const [location, setLocation] = useState('João Pessoa - PB');
   const [hasMediaForInsta, setHasMediaForInsta] = useState(true);
   const [note, setNote] = useState('');
-
-  // GPS state
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsStatus, setGpsStatus] = useState<string | null>(null);
-
-  // Save & quick note parse notice
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
-  const [parseFeedback, setParseFeedback] = useState<string | null>(null);
 
   useEffect(() => {
     setLumbarBefore(preWorkout.lumbarNow);
@@ -77,36 +92,9 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
 
   useEffect(() => {
     if (!caloriesManual) {
-      setCalories(estimateCalories(modality, durationMin));
+      setCalories(estimateCalories(modality, durationMin, latestWeightKg));
     }
-  }, [modality, durationMin, caloriesManual]);
-
-  const applyNoteParse = (spokenText: string) => {
-    const parsed = parseVoiceCheckIn(spokenText);
-    if (parsed.modality && parsed.modality !== 'Descanso Consciente') {
-      setModality(parsed.modality);
-      if (parsed.modality === 'Wellhub — Pilates') setIsWellhub(true);
-    }
-    if (parsed.isWellhub !== undefined) setIsWellhub(parsed.isWellhub);
-    if (parsed.effort !== undefined) setEffort(parsed.effort);
-    if (parsed.lumbarBefore !== undefined) setLumbarBefore(parsed.lumbarBefore);
-    if (parsed.lumbarAfter !== undefined) setLumbarAfter(parsed.lumbarAfter);
-    if (parsed.rightLegRadiation !== undefined) setRightLegRadiation(parsed.rightLegRadiation);
-    if (parsed.durationMin !== undefined) {
-      setDurationMin(parsed.durationMin);
-      if (parsed.calories === undefined) setCaloriesManual(false);
-    }
-    if (parsed.calories !== undefined) {
-      setCalories(parsed.calories);
-      setCaloriesManual(true);
-    }
-    if (parsed.hasMediaForInsta !== undefined) setHasMediaForInsta(parsed.hasMediaForInsta);
-    setParseFeedback(
-      parsed.matchedFields.length > 0
-        ? `Campos preenchidos: ${parsed.matchedFields.join(' · ')}`
-        : 'Nenhum campo numérico encontrado na nota.'
-    );
-  };
+  }, [modality, durationMin, caloriesManual, latestWeightKg]);
 
   const handleGetGps = () => {
     if (!navigator.geolocation) {
@@ -143,7 +131,7 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
           setGpsStatus('Localização atualizada via GPS.');
         } catch {
           setLocation(`${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
-          setGpsStatus('Coordenadas capturadas (edite o nome se preferir).');
+          setGpsStatus('Coordenadas capturadas.');
         } finally {
           setGpsLoading(false);
         }
@@ -156,7 +144,7 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
     );
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmitManual = (e: React.FormEvent) => {
     e.preventDefault();
     const { currentDay } = getProjectProgress(date);
     const parsedDist = distanceKm.trim()
@@ -190,50 +178,82 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
     );
     setNote('');
     setDistanceKm('');
-    setParseFeedback(null);
     window.setTimeout(() => setSavedNotice(null), 4500);
   };
 
-  return (
-    <div className="space-y-4">
-      {/* Universal Voice Trigger + Quick Conscious Rest */}
-      <section className="rounded-2xl bg-[#06283D] text-white p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5">
-        <div className="min-w-0">
-          <p className="text-[11px] font-bold text-[#7FDAD0]">
-            CHECK-IN DE MOVIMENTO · INDEPENDENTE DE SONO
+  // Primary Screen of Check-in Tab: Teleprompter + Bulletproof Voice Diary
+  if (!manualMode) {
+    return (
+      <div className="bg-white rounded-2xl border border-[#E5E0D5] p-4 sm:p-5 space-y-4">
+        <div>
+          <p className="text-[11px] font-bold text-[#1363DF]">
+            DIÁRIO POR VOZ UNIVERSAL · SEM LIMITE DE TEMPO
           </p>
-          <h2 className="font-display font-bold text-lg mt-0.5">
-            Prefere apenas falar o que fez?
+          <h2 className="font-display font-bold text-lg text-[#06283D] mt-0.5">
+            Falar meu dia
           </h2>
-          <p className="text-xs text-white/75 mt-0.5">
-            Use o Diário por Voz Universal para registrar treino, descanso, sono ou água de uma vez.
+          <p className="text-xs text-[#4A6578] mt-0.5">
+            Fale naturalmente sobre sono/escalas, como se sentiu, lombar, remédios, treino ou medidas — o app organiza tudo e salva a fala original no Banco Privado.
           </p>
         </div>
-        <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+
+        <VoiceDiaryPanel
+          todayIso={todayIso}
+          defaultLumbar={preWorkout.lumbarNow}
+          latestWeightKg={latestWeightKg}
+          onConfirmAll={onConfirmVoiceAll}
+          onOpenManualEntry={() => setManualMode(true)}
+        />
+      </div>
+    );
+  }
+
+  // Fallback Manual Entry Mode
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => setManualMode(false)}
+          className="min-h-[42px] px-3.5 rounded-xl bg-white border border-[#E5E0D5] text-xs font-bold text-[#06283D] inline-flex items-center gap-1.5 cursor-pointer"
+        >
+          <ArrowLeft className="w-4 h-4 text-[#1363DF]" />
+          <span>Voltar para Diário por Voz</span>
+        </button>
+
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={onOpenVoiceModal}
-            className="min-h-[48px] px-4 rounded-xl bg-[#00A896] hover:bg-[#009282] text-white font-display font-bold text-xs sm:text-sm inline-flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
+            onClick={onOpenSleepModal}
+            className="min-h-[42px] px-3 rounded-xl bg-white border border-[#E5E0D5] text-xs font-bold text-[#06283D] inline-flex items-center gap-1.5 cursor-pointer"
           >
-            <Mic className="w-4 h-4" aria-hidden="true" />
-            <span>Falar o que fiz agora</span>
+            <Moon className="w-3.5 h-3.5 text-[#1363DF]" />
+            <span>Lançar Sono</span>
           </button>
           <button
             type="button"
             onClick={onOpenRestModal}
-            className="min-h-[48px] px-4 rounded-xl bg-white/10 hover:bg-white/18 text-white font-semibold text-xs inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+            className="min-h-[42px] px-3 rounded-xl bg-[#ECFDF5] border border-[#00A896]/40 text-xs font-bold text-[#064E3B] inline-flex items-center gap-1.5 cursor-pointer"
           >
-            <ShieldCheck className="w-4 h-4 text-[#7FDAD0]" aria-hidden="true" />
+            <ShieldCheck className="w-3.5 h-3.5 text-[#00A896]" />
             <span>Descanso Consciente</span>
           </button>
         </div>
-      </section>
+      </div>
 
-      {/* Streamlined Movement-Only Check-in Form (Zero Sleep Fields) */}
       <form
-        onSubmit={handleSubmit}
+        onSubmit={handleSubmitManual}
         className="bg-white rounded-2xl border border-[#E5E0D5] p-4 sm:p-5 space-y-5"
       >
+        <div>
+          <h2 className="font-display font-bold text-base text-[#06283D]">
+            Lançamento Manual de Movimento / Treino
+          </h2>
+          <p className="text-xs text-[#4A6578]">
+            Modo manual de fallback — independente do histórico de sono.
+          </p>
+        </div>
+
         {savedNotice && (
           <div
             role="status"
@@ -244,7 +264,6 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
           </div>
         )}
 
-        {/* Quick Date: Hoje / Ontem + Date Picker */}
         <div>
           <span className="block text-xs font-bold text-[#06283D] mb-2">1. Dia do treino</span>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -283,7 +302,6 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
           </div>
         </div>
 
-        {/* 1-Tap Modality Picker */}
         <div>
           <span className="block text-xs font-bold text-[#06283D] mb-2">
             2. Modalidade (1 toque)
@@ -315,7 +333,6 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
           </div>
         </div>
 
-        {/* Duration, Calories, Distance */}
         <div className="grid grid-cols-3 gap-2.5">
           <div>
             <label htmlFor="ci-duration" className="block text-xs font-semibold text-[#4A6578] mb-1">
@@ -367,7 +384,6 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
           </div>
         </div>
 
-        {/* Lumbar Before -> After & Effort */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5">
           <div className="rounded-xl bg-[#F8F6F1] border border-[#E5E0D5] p-3.5">
             <div className="flex items-center justify-between text-xs font-semibold">
@@ -429,7 +445,6 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
           </div>
         </div>
 
-        {/* Clinical Alert + Wellhub + Insta Flags */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
           <label className="flex items-center gap-2.5 p-3 rounded-xl bg-[#FFF5F5] border border-[#E63946]/30 cursor-pointer min-h-[48px]">
             <input
@@ -467,7 +482,6 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
           </label>
         </div>
 
-        {/* Optional GPS Location */}
         <div>
           <label htmlFor="ci-location" className="block text-xs font-semibold text-[#4A6578] mb-1">
             Localização (opcional)
@@ -498,22 +512,10 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
           {gpsStatus && <p className="mt-1 text-[11px] text-[#5B7689]">{gpsStatus}</p>}
         </div>
 
-        {/* Note */}
         <div>
-          <div className="flex items-center justify-between gap-2 mb-1">
-            <label htmlFor="ci-note" className="text-xs font-semibold text-[#4A6578]">
-              Nota / Vitória Técnica do Dia
-            </label>
-            {note.trim().length > 10 && (
-              <button
-                type="button"
-                onClick={() => applyNoteParse(note)}
-                className="text-xs font-bold text-[#1363DF] hover:underline cursor-pointer"
-              >
-                Interpretar texto
-              </button>
-            )}
-          </div>
+          <label htmlFor="ci-note" className="block text-xs font-semibold text-[#4A6578] mb-1">
+            Nota / Vitória Técnica do Dia
+          </label>
           <textarea
             id="ci-note"
             rows={3}
@@ -522,9 +524,6 @@ export const CheckInTab: React.FC<CheckInTabProps> = ({
             placeholder="Como respondeu a lombar? Qual evolução técnica você sentiu hoje?"
             className="w-full p-3.5 rounded-xl bg-[#F8F6F1] border border-[#E5E0D5] text-sm text-[#06283D] focus:outline-2 focus:outline-[#1363DF]"
           />
-          {parseFeedback && (
-            <p className="mt-1 text-[11px] font-medium text-[#1363DF]">{parseFeedback}</p>
-          )}
         </div>
 
         <button
